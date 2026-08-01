@@ -95,9 +95,18 @@ jobs:
         PKG=$(find sdk/bin/packages \( -name "*.ipk" -o -name "*.apk" \) | head -n1)
 
         if [ -z "$PKG" ]; then
-        echo "Package not found!"
-        find sdk/bin/packages
-        exit 1
+          echo "Package not found!"
+          find sdk/bin/packages
+          exit 1
+        fi
+
+        FILE=$(basename "$PKG")
+        EXT="${FILE##*.}"
+
+        if [ "$EXT" = "ipk" ]; then
+          VERSION=$(echo "$FILE" | sed -E 's/^badvpn-tun2socks_([^_]+)_.+\.ipk$/\1/')
+        else
+          VERSION=$(echo "$FILE" | sed -E 's/^badvpn-tun2socks-(.+)\.apk$/\1/')
         fi
 
         cp "$PKG" "release/badvpn-tun2socks_${VERSION}_${ARCH}.${EXT}"
