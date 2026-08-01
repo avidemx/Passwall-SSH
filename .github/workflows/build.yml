@@ -82,7 +82,7 @@ jobs:
     - name: Build package
       working-directory: sdk
       run: |
-        make package/badvpn/compile -j$(nproc) V=s
+        make package/badvpn/{clean,compile} -j$(nproc) V=sc
 
     - name: Show generated packages
       run: |
