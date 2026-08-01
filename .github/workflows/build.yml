@@ -99,7 +99,9 @@ jobs:
         exit 1
         fi
 
-        cp "$PKG" release/
+        VERSION=$(basename "$PKG" | sed -E 's/^badvpn-tun2socks[-_]([0-9].*)\.(ipk|apk)$/\1/')
+
+        cp "$PKG" "release/badvpn-tun2socks_${VERSION}_${ARCH}.${EXT}"
 
         ls -lh release
 
