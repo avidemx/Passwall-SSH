@@ -1,0 +1,122 @@
+name: Build BadVPN OpenWrt
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  OPENWRT_VERSION: "25.12.5"
+  TARGET: "ramips"
+  SUBTARGET: "mt7621"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          gawk \
+          gettext \
+          git \
+          libncurses-dev \
+          libssl-dev \
+          python3 \
+          rsync \
+          unzip \
+          wget \
+          zstd
+
+    - name: Download OpenWrt SDK
+      run: |
+        SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/"
+
+        SDK_FILE=$(wget -qO- "$SDK_URL" \
+          | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' \
+          | head -n1)
+
+        wget "${SDK_URL}${SDK_FILE}"
+
+    - name: Extract SDK
+      run: |
+        tar --zstd -xf openwrt-sdk-*.tar.zst
+        SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*")
+        mv "$SDK_DIR" sdk
+
+    - name: Restore dl cache
+      uses: actions/cache@v4
+      with:
+        path: sdk/dl
+        key: dl-${{ env.OPENWRT_VERSION }}
+
+    - name: Restore host cache
+      uses: actions/cache@v4
+      with:
+        path: sdk/staging_dir/host
+        key: host-${{ runner.os }}
+
+    - name: Copy package
+      run: |
+        cp -a package/badvpn sdk/package/
+
+    - name: Configure SDK
+      working-directory: sdk
+      run: |
+        echo "CONFIG_PACKAGE_badvpn-tun2socks=y" >> .config
+        make defconfig
+
+    - name: Build package
+      working-directory: sdk
+      run: |
+        make package/badvpn/compile -j$(nproc) V=s
+
+    - name: Show generated packages
+      run: |
+        find sdk/bin/packages -name "*.ipk"
+
+    - name: Prepare Release
+      run: |
+        mkdir -p release
+        IPK=$(find sdk/bin/packages -name "*.ipk" | head -n1)
+        FILE=$(basename "$IPK")
+        ARCH=$(echo "$FILE" | sed -E 's/^.*_[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+_(.*)\.ipk$/\1/')
+        cp "$IPK" "release/badvpn-tun2socks_${ARCH}.ipk"
+        ls -lh release
+
+    - name: Upload build logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          sdk/logs
+          sdk/build_dir/**/*.log
+          sdk/.config
+
+    - name: Create GitHub Release
+      if: success()
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest
+        name: BadVPN Tun2Socks
+        draft: false
+        prerelease: false
+        make_latest: true
+        append_body: false
+        overwrite_files: true
+        files: release/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
