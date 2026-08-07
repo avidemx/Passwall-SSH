@@ -71,22 +71,31 @@ jobs:
       run: |
         echo "Finding compiled badvpn-tun2socks binary..."
         
-        # Mencari lokasi file binary badvpn yang baru saja selesai di-compile
-        # Lokasinya ada di folder staging/build_dir OpenWrt
-        BIN_PATH=$(find build_dir/ -path "*/ipkg-*/badvpn-tun2socks/usr/bin/badvpn-tun2socks" -type f | head -n 1)
+        # Debugging: tampilkan semua file badvpn-tun2socks yang berhasil dibuat
+        echo "Daftar binary yang ditemukan di build_dir:"
+        find build_dir/ -name "badvpn-tun2socks" -type f
         
+        # 1. Coba cari di dalam struktur usr/bin (biasanya file yang sudah siap pakai / stripped)
+        BIN_PATH=$(find build_dir/ -path "*/usr/bin/badvpn-tun2socks" -type f | head -n 1)
+        
+        # 2. Jika tidak ketemu, ambil langsung binary hasil kompilasi CMake
         if [ -z "$BIN_PATH" ]; then
-          echo "Error: badvpn-tun2socks binary not found!"
+          BIN_PATH=$(find build_dir/ -name "badvpn-tun2socks" -type f | grep -v "/CMakeFiles/" | head -n 1)
+        fi
+        
+        # 3. Validasi akhir
+        if [ -z "$BIN_PATH" ]; then
+          echo "Error: badvpn-tun2socks binary not found sama sekali!"
           exit 1
         fi
         
-        echo "Found binary at: $BIN_PATH"
+        echo "Found valid binary at: $BIN_PATH"
         
         # Membuat direktori usr/bin di dalam files passwall-ssh jika belum ada
         mkdir -p package/passwall-ssh/files/usr/bin/
         
         # Copy binary ke dalam passwall-ssh
-        cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/
+        cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         chmod +x package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         
         echo "Injection successful!"
