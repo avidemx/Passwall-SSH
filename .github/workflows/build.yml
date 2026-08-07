@@ -7,10 +7,26 @@ permissions:
   contents: write
 
 jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.read_version.outputs.version }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Read version from file
+      id: read_version
+      run: |
+        VERSION=$(cat VERSION | tr -d ' \r\n')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   build:
+    needs: setup
     name: Build OpenWrt ${{ matrix.owrt.major }} (${{ matrix.arch_item.arch }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      APP_VERSION: ${{ needs.setup.outputs.version }}
 
     strategy:
       fail-fast: false
@@ -63,6 +79,10 @@ jobs:
         sudo apt-get install -y \
           build-essential clang flex bison gawk gettext git \
           libncurses-dev libssl-dev python3 rsync unzip wget zstd
+
+    - name: Set Version in Makefile
+      run: |
+        sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
 
     - name: Download OpenWrt SDK
       run: |
@@ -122,18 +142,11 @@ jobs:
     - name: Prepare Release Artifacts
       run: |
         mkdir -p release
-        
-        # Ambil versi aplikasi secara otomatis dari Makefile
-        APP_VERSION=$(grep '^PKG_VERSION:=' package/passwall-ssh/Makefile | awk -F'=' '{print $2}' | tr -d ' ')
-        
-        # Cari file hasil build di dalam SDK
         PKG=$(find sdk/bin/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" | head -n 1)
         if [ -z "$PKG" ]; then
           echo "Error: file passwall-ssh*.${{ matrix.owrt.ext }} tidak ditemukan!"
           exit 1
         fi
-        
-        # Format nama file baru sesuai permintaan
         CUSTOM_NAME="passwall-ssh_${{ matrix.owrt.major }}_${APP_VERSION}_${{ matrix.arch_item.arch }}.${{ matrix.owrt.ext }}"
         cp "$PKG" "release/$CUSTOM_NAME"
         ls -lh release/
@@ -145,7 +158,7 @@ jobs:
         path: release/*
 
   release:
-    needs: build
+    needs: [setup, build]
     runs-on: ubuntu-24.04
     steps:
     - name: Download all artifacts
@@ -161,7 +174,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: latest
-        name: Passwall-SSH v.3.4.0
+        name: Passwall-SSH v${{ needs.setup.outputs.version }}
         body: |
           # STABIL - Optimal Performance 🚀
 
@@ -176,7 +189,9 @@ jobs:
           ### Arsitektur & Versi yang Tersedia:
           - **OpenWrt 24.x** (`.ipk`)
           - **OpenWrt 25.x** (`.apk`)
+          - Lengkap untuk berbagai jenis arsitektur router *(ramips, ath79, sunxi, rockchip, mvebu, x86)*.
           
+          *Sudah termasuk built-in BadVPN-Tun2Socks.*
         draft: false
         prerelease: false
         make_latest: true
