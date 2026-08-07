@@ -1,4 +1,4 @@
-# Passwall-SSH 🚀
+# Passwall-SSH Openwrt 24 dan 25🚀
 
 **Passwall-SSH** adalah *client* SSH Tunnel tingkat lanjut untuk OpenWrt yang dioptimalkan untuk stabilitas tinggi dan efisiensi CPU/RAM. Proyek ini memadukan kekuatan **OpenSSH**, **Stunnel** (untuk *SSL/TLS cloaking*), dan **BadVPN-tun2Socks** ke dalam satu paket instalasi yang ringan dan mudah digunakan.
 
