@@ -44,7 +44,7 @@ endef
 define Package/passwall-ssh/postinst
 #!/bin/sh
 [ -z "$${IPKG_INSTROOT}" ] || exit 0
-for svc in autossh stunnel dnsproxy; do
+for svc in stunnel dnsproxy; do
     if [ -x "/etc/init.d/$$svc" ]; then
         /etc/init.d/$$svc stop >/dev/null 2>&1
         /etc/init.d/$$svc disable >/dev/null 2>&1

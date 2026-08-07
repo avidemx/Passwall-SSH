@@ -1,6 +1,6 @@
 
 config sshtls 'main'
-	option enabled '1'
+	option enabled '0'
 	option selected_profile 'ilpedVPN'
 	option dns_proto 'DoH'
 	option dns_url 'cloudflare-dns.com/dns-query'
