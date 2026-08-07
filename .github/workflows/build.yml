@@ -178,20 +178,18 @@ jobs:
         body: |
           # STABIL - Optimal Performance 🚀
 
-          * Perbaikan beberapa bug
-          * Menghapus PingLoop
-          * Menghapus Auto On Start
-          * Sudah lebih ringan karena sudah tidak ada curl loop
-          * Performance sudah optimal
-          * Proses sudah lebih smart dengan auto-autoan dan deteksi kegagalan koneksi, atau internet bengong.
-
+         * Menambahkan dukungan lebih banyak token HTTP Payload.
+         * Menambahkan evaluator payload `[random=a;b;c]`.
+         * Menambahkan dukungan pengulangan token seperti `[crlf*2]`, `[lf*N]`, dan `[cr*N]`.
+         * Menambahkan pembuatan otomatis `Sec-WebSocket-Key` (`[ws_key]`) untuk payload WebSocket.
+         * Menambahkan deteksi otomatis metode HTTP melalui token `[method]`.
+         * Meningkatkan kompatibilitas dengan payload **HTTP Custom**.
+         * Meningkatkan stabilitas parser payload serta memperbaiki crash akibat karakter `%` pada proses penggantian token.
           ---
           ### Arsitektur & Versi yang Tersedia:
           - **OpenWrt 24.x** (`.ipk`)
           - **OpenWrt 25.x** (`.apk`)
-          - Lengkap untuk berbagai jenis arsitektur router *(ramips, ath79, sunxi, rockchip, mvebu, x86)*.
-          
-          *Sudah termasuk built-in BadVPN-Tun2Socks.*
+
         draft: false
         prerelease: false
         make_latest: true
