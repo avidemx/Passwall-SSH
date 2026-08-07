@@ -1,9 +1,6 @@
 name: Build Passwall-SSH (OpenWrt 24 & 25)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
