@@ -1,3 +1,5 @@
+![Screenshot](main.JPG)
+
 # Passwall-SSH for OpenWrt 24 & 25 🚀
 
 **Passwall-SSH** is a lightweight and advanced SSH Tunnel client for OpenWrt, designed for high stability, low CPU/RAM usage, and automatic recovery.
