@@ -19,9 +19,6 @@
 
 ## 📸 Tampilan Antarmuka (Screenshots)
 
-<!-- GANTI LINK DI BAWAH INI DENGAN NAMA FILE GAMBAR ANDA YANG DI-UPLOAD KE GITHUB -->
-
-### Tampilan Utama / Status
 ![Screenshot](main.JPG)
 
 ---
