@@ -1,50 +1,249 @@
-# Passwall-SSH Openwrt 24 dan 25🚀
+# Passwall-SSH for OpenWrt 24 & 25 🚀
 
-**Passwall-SSH** adalah *client* SSH Tunnel tingkat lanjut untuk OpenWrt yang dioptimalkan untuk stabilitas tinggi dan efisiensi CPU/RAM. Proyek ini memadukan kekuatan **OpenSSH**, **Stunnel** (untuk *SSL/TLS cloaking*), dan **BadVPN-tun2Socks** ke dalam satu paket instalasi yang ringan dan mudah digunakan.
+**Passwall-SSH** is a lightweight and advanced SSH Tunnel client for OpenWrt, designed for high stability, low CPU/RAM usage, and automatic recovery.
 
----
-
-## ✨ Fitur Utama
-* **Multi-Version Support:** Tersedia untuk OpenWrt 24 (`.ipk`) dan OpenWrt 25 (`.apk`).
-* **Multi-Architecture:** Mendukung berbagai jenis arsitektur router (RAMIPS, Ath79, Sunxi, Rockchip, Mvebu, dan x86/i386).
-* **Watchdog Cerdas:** Memantau ketersediaan port secara *real-time* dan melakukan pemulihan otomatis (auto-restart) secara senyap tanpa membebani sistem.
-* **Integrasi BadVPN Bawaan:** File instalasi sudah secara otomatis mencakup *binary* `badvpn-tun2socks` terkompilasi yang disesuaikan khusus dengan arsitektur router Anda.
-* **Mendukung TLS/SSL:** Dilengkapi dengan konfigurasi otomatis untuk Stunnel.
-* **Performa Optimal:** Telah dioptimalkan untuk mendeteksi kegagalan koneksi atau internet bengong secara cerdas.
-
-
-**WARNING!!** Hanya bekerja dengan jaringan IPv4. Untuk memulainya, pastikan untuk menonaktifkan IPv6 terlebih dahulu.
+It combines **OpenSSH**, **HTTP Payload Engine**, **Stunnel (TLS/SSL)**, and **BadVPN-tun2socks** into a single easy-to-install package.
 
 ---
 
-## 📸 Tampilan Antarmuka
+# ✨ Features
 
-![Screenshot](main.JPG)
+- Supports **OpenWrt 24 (.ipk)** and **OpenWrt 25 (.apk)**
+- Supports multiple CPU architectures
+- Lightweight and optimized for low-memory routers
+- Automatic watchdog with smart connection recovery
+- Built-in **BadVPN tun2socks**
+- Built-in **Stunnel** for SSL/TLS tunneling
+- HTTP Proxy & HTTP Injector support
+- Dynamic HTTP Payload Engine
+- WebSocket payload support
+- HTTP CONNECT support
+- Automatic SOCKS5 tunnel creation
+- Optimized asynchronous Lua proxy engine
+- IPv4 support
 
 ---
 
-## 🛠️ Cara Instalasi
+# HTTP Payload Engine
 
-1. Buka halaman **[Releases](../../releases/latest)** di repositori ini.
-2. Unduh file yang sesuai dengan versi OpenWrt dan arsitektur router Anda:
-   * Gunakan format **`.ipk`** untuk **OpenWrt 24.x**
-   * Gunakan format **`.apk`** untuk **OpenWrt 25.x**
-3. Upload file tersebut ke router OpenWrt (misalnya ke folder `/tmp/`).
-4. Jalankan perintah instalasi melalui terminal (SSH):
+Passwall-SSH includes a built-in HTTP payload engine compatible with most common HTTP Injector / HTTP Custom payloads used for SSH tunneling.
+
+## Supported Payload Features
+
+- Static payload parsing
+- Dynamic token replacement
+- HTTP GET / POST / CONNECT payloads
+- WebSocket payloads
+- HTTP Proxy payloads
+- SSL/TLS (Stunnel) payloads
+- Payload Split
+- Delay Split
+- Rotate Payload
+- Random Payload
+- Automatic HTTP CONNECT handling
+- WebSocket Key generation
+
+---
+
+# Supported Tokens
+
+## Server
+
+| Token | Description |
+|-------|-------------|
+| `[host]` | SSH Host |
+| `[server]` | Alias of `[host]` |
+| `[ssh]` | Alias of `[host]` |
+| `[ssh_host]` | SSH Host |
+| `[ip]` | Alias of `[host]` |
+| `[host_no_port]` | SSH Host |
+| `[port]` | SSH Port |
+| `[ssh_port]` | SSH Port |
+| `[host_port]` | host:port |
+| `[ip_port]` | host:port |
+
+---
+
+## Proxy
+
+| Token | Description |
+|-------|-------------|
+| `[proxy]` | Proxy Host |
+| `[proxy_host]` | Proxy Host |
+| `[proxy_port]` | Proxy Port |
+
+---
+
+## TLS / SNI
+
+| Token | Description |
+|-------|-------------|
+| `[sni]` | SNI Host |
+| `[sni_host]` | SNI Host |
+| `[sni_port]` | SNI Port (443) |
+
+---
+
+## HTTP Request
+
+| Token | Description |
+|-------|-------------|
+| `[method]` | HTTP Method |
+| `[protocol]` | HTTP/1.1 |
+| `[raw]` | Original client request |
+| `[real_raw]` | Original client request |
+| `[realData]` | Original client request |
+| `[netData]` | Original client request |
+| `[ua]` | Default User-Agent |
+
+---
+
+## WebSocket
+
+| Token | Description |
+|-------|-------------|
+| `[ws_key]` | Random Sec-WebSocket-Key |
+| `[ws-key]` | Alias of `[ws_key]` |
+
+---
+
+## Special Characters
+
+| Token | Result |
+|-------|--------|
+| `[crlf]` | `\r\n` |
+| `[cr]` | `\r` |
+| `[lf]` | `\n` |
+
+Supports multiplier:
+
+```
+[crlf*2]
+[crlf*3]
+[lf*5]
+```
+
+---
+
+## Payload Control
+
+### Split
+
+```
+GET / HTTP/1.1
+...
+[split]
+SECOND PAYLOAD
+```
+
+### Delay Split
+
+```
+GET / HTTP/1.1
+...
+[delay_split]
+SECOND PAYLOAD
+```
+
+Delay duration follows the configured Delay value.
+
+---
+
+## Rotate
+
+Cycles through payload variants.
+
+```
+[rotate=a;b;c]
+```
+
+Output:
+
+```
+a
+b
+c
+a
+b
+...
+```
+
+---
+
+## Random
+
+Chooses one payload randomly.
+
+```
+[random=a;b;c]
+```
+
+---
+
+# Token Names
+
+Token names are **case-sensitive**.
+
+Correct:
+
+```
+[host]
+[server]
+[port]
+[ua]
+[method]
+[ws_key]
+```
+
+Incorrect:
+
+```
+[HOST]
+[Host]
+[PORT]
+[Ua]
+[Method]
+```
+
+Always use lowercase token names exactly as documented.
+
+---
+
+# Installation
+
+1. Download the latest package from the **Releases** page.
+2. Choose the correct package:
+   - `.ipk` for OpenWrt 24
+   - `.apk` for OpenWrt 25
+3. Upload it to `/tmp`
+4. Install via SSH
 
 ```bash
-# Untuk OpenWrt 24 (.ipk)
+# OpenWrt 24
 opkg update
-opkg install --force-depends /tmp/passwall-ssh_24_3.4.0_*.ipk
+opkg install --force-depends /tmp/passwall-ssh_24_*.ipk
 
-# Untuk OpenWrt 25 (.apk)
+# OpenWrt 25
 apk update
-apk add --allow-untrusted /tmp/passwall-ssh_25_3.4.0_*.apk
+apk add --allow-untrusted /tmp/passwall-ssh_25_*.apk
 ```
+
 ---
 
-## Thanks To
+# Requirements
 
-- [ambrop72](https://github.com/ambrop72/badvpn) — Creator of BadVPN.
-- [ChatGPT](https://chatgpt.com) — Assistance with development and debugging.
-- [Gemini](https://gemini.google.com) — Assistance with development and scripting.
+- IPv4 only
+- Disable IPv6 before use
+- OpenSSH
+- BadVPN tun2socks
+- (Optional) Stunnel for TLS mode
+
+---
+
+# Thanks
+
+- ambrop72 — BadVPN
+- OpenSSH Developers
+- LuaSocket Developers
+- ChatGPT — Development assistance
+- Gemini — Development assistance
