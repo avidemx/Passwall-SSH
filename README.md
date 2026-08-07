@@ -12,7 +12,9 @@
 * **Mendukung TLS/SSL:** Dilengkapi dengan konfigurasi otomatis untuk Stunnel.
 * **Performa Optimal:** Telah dioptimalkan untuk mendeteksi kegagalan koneksi atau internet bengong secara cerdas.
 
-> **WARNING!!** Hanya bekerja dengan jaringan IPv4. Untuk memulainya, pastikan untuk menonaktifkan IPv6 terlebih dahulu.
+---
+
+**WARNING!!** Hanya bekerja dengan jaringan IPv4. Untuk memulainya, pastikan untuk menonaktifkan IPv6 terlebih dahulu.
 
 ---
 
