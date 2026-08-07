@@ -17,7 +17,7 @@
 
 ---
 
-## 📸 Tampilan Antarmuka (Screenshots)
+## 📸 Tampilan Antarmuka
 
 ![Screenshot](main.JPG)
 
