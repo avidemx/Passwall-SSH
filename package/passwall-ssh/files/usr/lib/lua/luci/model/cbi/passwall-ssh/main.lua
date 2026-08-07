@@ -27,48 +27,48 @@ header_ui.rawhtml = true
 header_ui.cfgvalue = function()
     return [=[
     <style>
-    /* Styling Standar Passwall */
-    .cbi-section-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #2b2b2b; border-radius: 4px; overflow: hidden; }
-    .cbi-section-table th, .cbi-section-table td { padding: 12px; text-align: left; border-bottom: 1px solid #333; color: #ccc; }
-    .cbi-section-table th { background: #333; color: #fff; font-size: 13px; }
-    .cbi-section-table tr:hover { background: #353535; }
+    /* Styling Standar Passwall - Transparan & Bersih */
+    .cbi-section-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: transparent; border-radius: 4px; overflow: hidden; }
+    .cbi-section-table th, .cbi-section-table td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(128, 128, 128, 0.2); color: inherit; }
+    .cbi-section-table th { background: rgba(128, 128, 128, 0.1); color: inherit; font-size: 13px; font-weight: bold; }
+    .cbi-section-table tr:hover { background: rgba(128, 128, 128, 0.05); }
 
-    .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 20px; }
+    .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 20px; color: inherit; }
 
-    .pw-panel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; background: #2b2b2b; padding: 15px; border-radius: 4px; border: 1px solid #1a1a1a; width: 100%; box-sizing: border-box; }
+    .pw-panel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; background: transparent; padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); width: 100%; box-sizing: border-box; }
     @media screen and (max-width: 768px) { .pw-panel { grid-template-columns: repeat(2, 1fr); } }
     @media screen and (max-width: 480px) { .pw-panel { grid-template-columns: 1fr; } }
 
-    .pw-box { display: flex; align-items: center; background: #1f1f1f; padding: 15px; border-radius: 4px; border: 1px solid #111; transition: 0.2s; }
-    .pw-icon { width: 30px; height: 30px; margin-right: 15px; color: #ccc; display: flex; align-items: center; justify-content: center; }
+    .pw-box { display: flex; align-items: center; background: rgba(128, 128, 128, 0.05); padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); transition: 0.2s; }
+    .pw-icon { width: 30px; height: 30px; margin-right: 15px; color: inherit; opacity: 0.7; display: flex; align-items: center; justify-content: center; }
     .pw-info { display: flex; flex-direction: column; }
-    .pw-title { font-size: 12px; color: #a1a1a1; margin-bottom: 4px; font-weight: bold; }
+    .pw-title { font-size: 12px; color: inherit; opacity: 0.7; margin-bottom: 4px; font-weight: bold; }
     .pw-val { font-size: 14px; font-weight: bold; transition: 0.2s; }
     
     .pw-box.clickable { cursor: pointer; }
-    .pw-box.clickable:hover { background: #2a2a2a; border-color: #333; }
-    .pw-box.clickable .pw-icon { color: #5bc0de; }
+    .pw-box.clickable:hover { background: rgba(128, 128, 128, 0.15); border-color: rgba(128, 128, 128, 0.4); }
+    .pw-box.clickable .pw-icon { color: #5bc0de; opacity: 1; }
 
-    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid #555; margin-bottom: 15px; flex-wrap: wrap; padding-bottom: 10px; gap: 15px; }
+    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid rgba(128, 128, 128, 0.3); margin-bottom: 15px; flex-wrap: wrap; padding-bottom: 10px; gap: 15px; }
     
     .cbi-tabmenu { list-style: none; padding: 0; margin: 0; display: flex; border-bottom: none; }
     .cbi-tabmenu li { margin-right: 2px; }
-    .cbi-tabmenu li a { display: block; padding: 6px 15px; text-decoration: none; color: #888; border: 1px solid transparent; border-bottom: none; font-size: 13px; }
-    .cbi-tabmenu li.active a { color: #5bc0de; border-color: #555; border-bottom: 1px solid #1f1f1f; margin-bottom: -1px; background: transparent; }
+    .cbi-tabmenu li a { display: block; padding: 6px 15px; text-decoration: none; color: inherit; opacity: 0.6; border: 1px solid transparent; border-bottom: none; font-size: 13px; }
+    .cbi-tabmenu li.active a { color: #5bc0de !important; border-color: rgba(128, 128, 128, 0.3); border-bottom: 1px solid transparent; margin-bottom: -1px; background: rgba(128, 128, 128, 0.05); opacity: 1; }
     
-    .profile-text { font-size: 16px; color: #ccc; display: flex; align-items: center; margin-left: auto; }
-    .profile-text .p-name { font-weight: bold; color: #fff; margin-right: 5px; }
+    .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; }
+    .profile-text .p-name { font-weight: bold; color: inherit; margin-right: 5px; opacity: 1; }
     .profile-text .p-status { font-weight: bold; margin-left: 3px; }
 
     /* STYLING WIDGET IP & ANIMASI */
     #ip-widget-placeholder { display: flex; align-items: center; justify-content: center; margin-bottom: 25px; width: 100%; }
     
     .status-bar { 
-        background: #1f1f1f; 
-        border: 1px solid #333; 
+        background: rgba(128, 128, 128, 0.05); 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
         border-radius: 4px;            
         padding: 10px 15px; 
-        color: white;
+        color: inherit;
         display: flex; 
         justify-content: center; 
         align-items: center;
@@ -81,12 +81,15 @@ header_ui.cfgvalue = function()
     .flag { height: 20px; width: 28px; display: flex; align-items: center; justify-content: center; overflow: hidden; } 
     .flag img { height: 100%; width: 100%; object-fit: contain; border-radius: 2px; }
 
-    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; }
-    .separator { color: #666; font-weight: normal; }
+    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
+    .separator { color: inherit; opacity: 0.5; font-weight: normal; text-shadow: none; }
 
     .text-offline { color: #ff4c4c !important; }
     .text-online { color: #4caf50 !important; }
-    .text-isp { color: #ffeb3b !important; }
+    
+    /* Warna Kustom Country (Biru) & ISP (Pink) */
+    .text-country { color: #4da6ff !important; }
+    .text-isp-name { color: #ff99cc !important; }
 
     @keyframes spin-globe { 100% { transform: rotate(360deg); } }
     @keyframes wave-flag { 
@@ -97,17 +100,27 @@ header_ui.cfgvalue = function()
     .spin-anim { animation: spin-globe 1.5s linear infinite; height: 20px !important; width: 20px !important; }
     .wave-anim { animation: wave-flag 2.5s ease-in-out infinite; transform-origin: bottom left; }
     
-    /* FIX HIDE FIELDS MANAGEMENT (DENGAN ID LUA YANG BENAR) */
-    .hide-main-fields #cbi-passwall-ssh-main-enabled,
-    .hide-main-fields #cbi-passwall-ssh-main-selected_profile {
-        display: none !important;
+    /* KOTAK LOG DIBUAT GELAP AGAR TULISAN PUTIH TERBACA JELAS */
+    #log_box {
+        background-color: #1a1a1a !important; 
+        color: #e0e0e0 !important; 
+        padding: 10px; 
+        font-family: monospace; 
+        height: 450px; 
+        overflow-y: scroll; 
+        border-radius: 4px; 
+        white-space: pre-wrap; 
+        font-size: 12px; 
+        border: 1px solid rgba(128, 128, 128, 0.4);
     }
+
+    /* FIX HIDE FIELDS MANAGEMENT */
+    .hide-main-fields #cbi-passwall-ssh-main-enabled,
+    .hide-main-fields #cbi-passwall-ssh-main-selected_profile { display: none !important; }
 
     .hide-dns-fields #cbi-passwall-ssh-main-dns_proto,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_ip,
-    .hide-dns-fields #cbi-passwall-ssh-main-dns_url {
-        display: none !important;
-    }
+    .hide-dns-fields #cbi-passwall-ssh-main-dns_url { display: none !important; }
     </style>
 
     <div class="full-width-container">
@@ -173,8 +186,8 @@ header_ui.cfgvalue = function()
 
         <!-- Log Container -->
         <div id="log-container" style="display: none;">
-            <div style="font-weight: bold; margin-bottom: 5px; color: #888;">LOG (Auto Clean) :</div>
-            <div id="log_box" style="background-color:#141414; color:#ccc; padding:10px; font-family:monospace; height:450px; overflow-y:scroll; border-radius:3px; white-space:pre-wrap; font-size:12px; border: 1px solid #333;">Loading...</div>
+            <div style="font-weight: bold; margin-bottom: 5px; color: inherit; opacity: 0.9;">LOG (Auto Clean) :</div>
+            <div id="log_box">Loading...</div>
         </div>
     </div>
 
@@ -218,8 +231,8 @@ header_ui.cfgvalue = function()
                 ipText.innerHTML = data.ip;
                 ipText.className = "text-online";
                 
-                infoText.innerHTML = (data.country || "Unknown") + ' <span class="separator">|</span> ' + (data.isp || "Unknown");
-                infoText.className = "text-isp";
+                infoText.innerHTML = '<span class="text-country">' + (data.country || "Unknown") + '</span> <span class="separator">|</span> <span class="text-isp-name">' + (data.isp || "Unknown") + '</span>';
+                infoText.className = ""; 
                 
                 if(pStatus) {
                     pStatus.innerHTML = "Connected";
@@ -355,9 +368,12 @@ header_ui.cfgvalue = function()
                     var formattedLines = [];
                     for (var i = 0; i < lines.length; i++) {
                         if (lines[i].trim() === "") continue;
-                        var color = "#d4d4d4"; 
+                        
+                        /* KEMBALIKAN KE WARNA ABU-ABU TERANG SECARA ABSOLUT AGAR TIDAK BOCOR HIJAU */
+                        var color = "#e0e0e0"; 
                         if (lines[i].indexOf("GAGAL") >= 0 || lines[i].indexOf("ERROR") >= 0 || lines[i].indexOf("STOPPED") >= 0) color = "#ff4c4c"; 
                         else if (lines[i].indexOf("sukses") >= 0 || lines[i].indexOf("OK") >= 0 || lines[i].indexOf("RUNNING") >= 0) color = "#4caf50";
+                        
                         var processedLine = lines[i].replace(/(\[[0-9]{2}:[0-9]{2}:[0-9]{2}\])/g, '<span style="color: #888;">$1</span>');
                         formattedLines.push('<span style="color: ' + color + ';">' + processedLine + '</span>');
                     }
@@ -435,6 +451,7 @@ conf.anonymous = false
 
 conf.extedit = luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", "%s")
 
+-- ====== HOOK AUTO-REDIRECT ======
 function conf.create(self, section)
     local created = TypedSection.create(self, section)
     if created then
@@ -445,17 +462,21 @@ function conf.create(self, section)
     end
     return created
 end
+-- =================================
 
+-- ====== DETEKSI VERSI OS UNTUK FIX KOLOM GANDA ======
 local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
-
+-- Cek apakah sistem menggunakan OpenWrt 24, 23, 22, atau 21
 local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
 
+-- Jika BUKAN OpenWrt lama (berarti OpenWrt 25 ke atas / SNAPSHOT), baru kita render kolom manual
 if not is_old_openwrt then
     name_list = conf:option(DummyValue, "_name", "Name")
     function name_list.cfgvalue(self, section)
         return section
     end
 end
+-- ====================================================
 
 host_list = conf:option(DummyValue, "host", "Address")
 host_port_list = conf:option(DummyValue, "host_port", "Port")
