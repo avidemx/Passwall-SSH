@@ -1,10 +1,10 @@
-name: Build BadVPN OpenWrt
+name: Build Passwall-SSH with Built-in BadVPN
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 env:
   OPENWRT_VERSION: "25.12.5"
@@ -14,11 +14,11 @@ env:
 
 jobs:
   build:
+    name: Compile BadVPN & Build Passwall-SSH
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
-
     - name: Checkout repository
       uses: actions/checkout@v4
 
@@ -26,29 +26,13 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential \
-          clang \
-          flex \
-          bison \
-          gawk \
-          gettext \
-          git \
-          libncurses-dev \
-          libssl-dev \
-          python3 \
-          rsync \
-          unzip \
-          wget \
-          zstd
+          build-essential clang flex bison gawk gettext git \
+          libncurses-dev libssl-dev python3 rsync unzip wget zstd
 
     - name: Download OpenWrt SDK
       run: |
         SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/"
-
-        SDK_FILE=$(wget -qO- "$SDK_URL" \
-          | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' \
-          | head -n1)
-
+        SDK_FILE=$(wget -qO- "$SDK_URL" | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' | head -n1)
         wget "${SDK_URL}${SDK_FILE}"
 
     - name: Extract SDK
@@ -63,76 +47,87 @@ jobs:
         path: sdk/dl
         key: dl-${{ env.OPENWRT_VERSION }}
 
-    - name: Restore host cache
-      uses: actions/cache@v4
-      with:
-        path: sdk/staging_dir/host
-        key: host-${{ runner.os }}
-
-    - name: Copy package
+    - name: Copy packages to SDK
       run: |
+        # Mengcopy folder badvpn dan passwall-ssh ke dalam SDK
         cp -a package/badvpn sdk/package/
+        cp -a package/passwall-ssh sdk/package/
 
     - name: Configure SDK
       working-directory: sdk
       run: |
         echo "CONFIG_PACKAGE_badvpn-tun2socks=y" >> .config
+        echo "CONFIG_PACKAGE_passwall-ssh=y" >> .config
         make defconfig
 
-    - name: Build package
+    - name: 1. Compile BadVPN
       working-directory: sdk
       run: |
-        make package/badvpn/{clean,compile} -j$(nproc) V=sc
+        echo "Compiling BadVPN Tun2Socks..."
+        make package/badvpn/{clean,compile} -j$(nproc) V=s
 
-    - name: Show generated packages
+    - name: 2. Inject BadVPN into Passwall-SSH
+      working-directory: sdk
       run: |
-        find sdk/bin/packages \( -name "*.ipk" -o -name "*.apk" \)
-
-    - name: Prepare Release
-      run: |
-        mkdir -p release
-
-        PKG=$(find sdk/bin/packages \( -name "*.ipk" -o -name "*.apk" \) | head -n1)
-
-        if [ -z "$PKG" ]; then
-          echo "Package not found!"
-          find sdk/bin/packages
+        echo "Finding compiled badvpn-tun2socks binary..."
+        
+        # Mencari lokasi file binary badvpn yang baru saja selesai di-compile
+        # Lokasinya ada di folder staging/build_dir OpenWrt
+        BIN_PATH=$(find build_dir/ -path "*/ipkg-*/badvpn-tun2socks/usr/bin/badvpn-tun2socks" -type f | head -n 1)
+        
+        if [ -z "$BIN_PATH" ]; then
+          echo "Error: badvpn-tun2socks binary not found!"
           exit 1
         fi
+        
+        echo "Found binary at: $BIN_PATH"
+        
+        # Membuat direktori usr/bin di dalam files passwall-ssh jika belum ada
+        mkdir -p package/passwall-ssh/files/usr/bin/
+        
+        # Copy binary ke dalam passwall-ssh
+        cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/
+        chmod +x package/passwall-ssh/files/usr/bin/badvpn-tun2socks
+        
+        echo "Injection successful!"
 
-        FILE=$(basename "$PKG")
-        EXT="${FILE##*.}"
+    - name: 3. Compile Passwall-SSH (Final APK)
+      working-directory: sdk
+      run: |
+        echo "Compiling Passwall-SSH with injected BadVPN..."
+        make package/passwall-ssh/{clean,compile} -j$(nproc) V=s
 
-        if [ "$EXT" = "ipk" ]; then
-          VERSION=$(echo "$FILE" | sed -E 's/^badvpn-tun2socks_([^_]+)_.+\.ipk$/\1/')
-        else
-          VERSION=$(echo "$FILE" | sed -E 's/^badvpn-tun2socks-(.+)\.apk$/\1/')
+    - name: Prepare Release Artifacts
+      run: |
+        mkdir -p release
+        
+        # Temukan file passwall-ssh.apk yang sudah jadi
+        PASSWALL_APK=$(find sdk/bin/packages/ -name "passwall-ssh*.apk" | head -n 1)
+        
+        if [ -z "$PASSWALL_APK" ]; then
+          echo "Error: passwall-ssh APK not found!"
+          exit 1
         fi
+        
+        cp "$PASSWALL_APK" release/
+        echo "Build ready:"
+        ls -lh release/
 
-        cp "$PKG" "release/badvpn-tun2socks_${VERSION}_${ARCH}.${EXT}"
-
-        ls -lh release
-
-    - name: Upload build logs
-      if: failure()
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: |
-          sdk/logs
-          sdk/build_dir/**/*.log
-          sdk/.config
+        name: passwall-ssh-with-badvpn-${{ env.ARCH }}
+        path: release/*
 
     - name: Create GitHub Release
-      if: success()
+      if: success() && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: latest
-        name: BadVPN Tun2Socks
+        name: Passwall-SSH (Built-in BadVPN)
         draft: false
         prerelease: false
         make_latest: true
-        append_body: false
         overwrite_files: true
         files: release/*
       env:

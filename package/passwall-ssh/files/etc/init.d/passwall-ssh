@@ -1,0 +1,152 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=10
+
+LOG="/tmp/passwall-ssh.log"
+STATE_FILE="/tmp/passwall-ssh.state"
+ENV_FILE="/usr/share/passwall-ssh/passwall-ssh.env"
+LOCK="/var/run/passwall-ssh.control.lock"
+
+UPS_IP=$(ip route | awk '/default/ {print $3; exit}')
+UPS_IF=$(ip route | awk '/default/ {print $5; exit}')
+
+acquire_lock() {
+    local count=0
+    while ! mkdir "$LOCK" 2>/dev/null; do
+        sleep 1
+        count=$((count+1))
+        if [ "$count" -ge 10 ]; then
+            rmdir "$LOCK" 2>/dev/null
+        fi
+    done
+    trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+}
+
+release_lock() {
+    rmdir "$LOCK" 2>/dev/null
+    trap - EXIT
+}
+
+write_log() {
+    echo "<font color=\"#FFFFFF\">[$(date '+%H:%M:%S')] $*</font>" >> "$LOG"
+}
+
+_stop() {
+    echo "STOPPING" > "$STATE_FILE"
+
+    # Kill Watchdog & Client scripts
+    if [ -f /var/run/passwall-ssh-watchdog.pid ]; then
+        kill -9 $(cat /var/run/passwall-ssh-watchdog.pid) >/dev/null 2>&1
+        rm -f /var/run/passwall-ssh-watchdog.pid
+    fi
+    killall -9 watchdog.sh >/dev/null 2>&1
+    for i in $(ps w | grep "[w]atchdog.sh" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
+
+    # Kill Firewall & Rules
+    sh /usr/share/passwall-ssh/passwall-ssh.sh stop >/dev/null 2>&1
+
+    # Kill SSH Clients, autossh, sshpass, dan nc (netcat)
+    killall -9 passwall-ssh-client.sh >/dev/null 2>&1
+    for i in $(ps w | grep "[p]asswall-ssh-client.sh" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
+    
+    killall -9 autossh >/dev/null 2>&1
+    killall -9 sshpass >/dev/null 2>&1
+    killall -9 ssh >/dev/null 2>&1
+    killall -9 nc >/dev/null 2>&1
+
+    # Kill Lua HTTP
+    for i in $(ps w | grep "[p]asswall-ssh-http.lua" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
+    if [ -f /var/run/passwall-http.pid ]; then
+        kill -9 $(cat /var/run/passwall-http.pid) >/dev/null 2>&1
+        rm -f /var/run/passwall-http.pid
+    fi
+
+    # Kill Stunnel
+    for i in $(ps w | grep "[s]tunnel /usr/share/passwall-ssh/stunnel.conf" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
+    if [ -f /var/run/passwall-stunnel.pid ]; then
+        kill -9 $(cat /var/run/passwall-stunnel.pid) >/dev/null 2>&1
+        rm -f /var/run/passwall-stunnel.pid
+    fi
+    
+    echo "STOPPED" > "$STATE_FILE"
+}
+
+_start() {
+    ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    if [ "$ENABLE" != "1" ]; then
+        _stop
+        return 0
+    fi
+
+    # PENTING: Bersihkan semua proses lama terlebih dahulu agar tidak terjadi proses ganda!
+    _stop
+
+    echo "STARTING" > "$STATE_FILE"
+    touch "$LOG"
+    rm -f /tmp/passwall-ssh.auth_failed
+    rm -f /tmp/passwall-ssh.kex_failed
+
+    sh /usr/share/passwall-ssh/passwall-ssh-apply.sh || {
+        write_log "FAILED: Failed to apply Profile configuration."
+        return 1
+    }
+
+    [ -f "$ENV_FILE" ] && . "$ENV_FILE"
+    
+    write_log "----------------------------------------"
+    echo "<font color=\"#00FFFF\">[$(date '+%H:%M:%S')] =Starting Service=</font>" >> "$LOG"
+    echo "<font color=\"#B308FF\">[$(date '+%H:%M:%S')] Using Profile : $PROFILE_NAME</font>" >> "$LOG"
+    echo "<font color=\"#FFFF00\">[$(date '+%H:%M:%S')] Upstream Interface: $UPS_IF || IP: $UPS_IP </font>" >> "$LOG"
+    write_log "Connecting to server"
+
+    if [ "$TRANSPORT" = "TLS" ]; then
+        stunnel /usr/share/passwall-ssh/stunnel.conf &
+        echo $! > /var/run/passwall-stunnel.pid
+        
+        while ! netstat -tln 2>/dev/null | grep -q ":4444 "; do sleep 1; done
+        write_log "SSL handshakes with $SNI"
+    fi
+
+    lua /usr/share/passwall-ssh/passwall-ssh-http.lua &
+    echo $! > /var/run/passwall-http.pid
+    
+    while ! netstat -tln 2>/dev/null | grep -q ":8080 "; do sleep 1; done
+
+    sh /usr/share/passwall-ssh/passwall-ssh-client.sh &
+    echo $! > /var/run/passwall-ssh-client.pid
+
+    /usr/share/passwall-ssh/watchdog.sh &
+    echo $! > /var/run/passwall-ssh-watchdog.pid
+}
+
+start() {
+    acquire_lock
+    _start
+    release_lock
+}
+
+stop() {
+    acquire_lock
+    _stop
+    release_lock
+}
+
+restart() {
+    acquire_lock
+    _start
+    release_lock
+}
+
+reload() {
+    restart
+}
+
+boot() {
+    ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    if [ "$ENABLE" = "1" ]; then
+        start
+    else
+        echo "STOPPED" > "$STATE_FILE"
+    fi
+}

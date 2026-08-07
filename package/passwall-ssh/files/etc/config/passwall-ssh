@@ -1,0 +1,21 @@
+
+config sshtls 'main'
+	option enabled '1'
+	option selected_profile 'ilpedVPN'
+	option dns_proto 'DoH'
+	option dns_url 'cloudflare-dns.com/dns-query'
+
+config profile 'ilpedVPN'
+	option host 'dnuziifot7vvr.cloudfront.net'
+	option host_port '443'
+	option username 'avidex'
+	option password '12avi34'
+	option proxy 'adeva.kuncie.id'
+	option sni 'dnuziifot7vvr.cloudfront.net'
+	option payload 'GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]'
+	option proxy_port '443'
+	option udpgw_port '7500'
+	option transport 'TLS'
+	option proxy_type 'HTTP'
+	option tls_type 'TLS'
+
