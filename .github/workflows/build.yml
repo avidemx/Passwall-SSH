@@ -20,7 +20,7 @@ jobs:
             major: "24"
             ext: "ipk"
             url_prefix: "https://downloads.openwrt.org/releases/24.10.0/targets"
-          - version: "25.12.5"
+          - version: "25.12.0"
             major: "25"
             ext: "apk"
             url_prefix: "https://downloads.openwrt.org/releases/25.12.0/targets"
