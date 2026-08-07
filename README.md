@@ -1,4 +1,4 @@
-# Passwall-SSH v3.4.0 (Multi-Architecture) 🚀
+# Passwall-SSH 🚀
 
 **Passwall-SSH** adalah *client* SSH Tunnel tingkat lanjut untuk OpenWrt yang dioptimalkan untuk stabilitas tinggi dan efisiensi CPU/RAM. Proyek ini memadukan kekuatan **OpenSSH**, **Stunnel** (untuk *SSL/TLS cloaking*), dan **BadVPN-tun2Socks** ke dalam satu paket instalasi yang ringan dan mudah digunakan.
 
@@ -42,6 +42,8 @@ opkg install --force-depends /tmp/passwall-ssh_24_3.4.0_*.ipk
 # Untuk OpenWrt 25 (.apk)
 apk update
 apk add --allow-untrusted /tmp/passwall-ssh_25_3.4.0_*.apk
+```
+---
 
 ## Thanks To
 
