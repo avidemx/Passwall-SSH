@@ -38,7 +38,6 @@ define Package/passwall-ssh/install
 	# Memberi izin eksekusi
 	chmod +x $(1)/etc/init.d/passwall-ssh
 	chmod +x $(1)/usr/share/passwall-ssh/*.sh
-	chmod +x $(1)/usr/bin/badvpn-tun2socks
 endef
 
 define Package/passwall-ssh/postinst
