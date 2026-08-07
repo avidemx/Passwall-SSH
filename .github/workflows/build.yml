@@ -1,4 +1,4 @@
-name: Build Passwall-SSH with Built-in BadVPN
+name: Build Passwall-SSH (OpenWrt 24 & 25)
 
 on:
   push:
@@ -6,17 +6,26 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  OPENWRT_VERSION: "25.12.5"
-  TARGET: "ramips"
-  SUBTARGET: "mt7621"
-  ARCH: "mipsel_24kc"
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Compile BadVPN & Build Passwall-SSH
+    name: Build for OpenWrt ${{ matrix.owrt }} (${{ matrix.ext }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+
+    # Menggunakan Matrix Strategy untuk memproses 2 versi OpenWrt secara paralel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owrt: "24.10"
+            sdk_url: "https://downloads.openwrt.org/releases/24.10.0/targets/ramips/mt7621/"
+            ext: "ipk"
+          - owrt: "25.12"
+            sdk_url: "https://downloads.openwrt.org/releases/25.12.0/targets/ramips/mt7621/"
+            ext: "apk"
 
     steps:
     - name: Checkout repository
@@ -29,11 +38,10 @@ jobs:
           build-essential clang flex bison gawk gettext git \
           libncurses-dev libssl-dev python3 rsync unzip wget zstd
 
-    - name: Download OpenWrt SDK
+    - name: Download OpenWrt SDK (${{ matrix.owrt }})
       run: |
-        SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/"
-        SDK_FILE=$(wget -qO- "$SDK_URL" | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' | head -n1)
-        wget "${SDK_URL}${SDK_FILE}"
+        SDK_FILE=$(wget -qO- "${{ matrix.sdk_url }}" | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' | head -n1)
+        wget "${{ matrix.sdk_url }}${SDK_FILE}"
 
     - name: Extract SDK
       run: |
@@ -45,11 +53,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: sdk/dl
-        key: dl-${{ env.OPENWRT_VERSION }}
+        key: dl-openwrt-${{ matrix.owrt }}
 
     - name: Copy packages to SDK
       run: |
-        # Mengcopy folder badvpn dan passwall-ssh ke dalam SDK
         cp -a package/badvpn sdk/package/
         cp -a package/passwall-ssh sdk/package/
 
@@ -63,81 +70,79 @@ jobs:
     - name: 1. Compile BadVPN
       working-directory: sdk
       run: |
-        echo "Compiling BadVPN Tun2Socks..."
         make package/badvpn/{clean,compile} -j$(nproc) V=s
 
     - name: 2. Inject BadVPN into Passwall-SSH
       working-directory: sdk
       run: |
-        echo "Finding compiled badvpn-tun2socks binary..."
-        
-        # Debugging: tampilkan semua file badvpn-tun2socks yang berhasil dibuat
-        echo "Daftar binary yang ditemukan di build_dir:"
-        find build_dir/ -name "badvpn-tun2socks" -type f
-        
-        # 1. Coba cari di dalam struktur usr/bin (biasanya file yang sudah siap pakai / stripped)
         BIN_PATH=$(find build_dir/ -path "*/usr/bin/badvpn-tun2socks" -type f | head -n 1)
-        
-        # 2. Jika tidak ketemu, ambil langsung binary hasil kompilasi CMake
         if [ -z "$BIN_PATH" ]; then
           BIN_PATH=$(find build_dir/ -name "badvpn-tun2socks" -type f | grep -v "/CMakeFiles/" | head -n 1)
         fi
-        
-        # 3. Validasi akhir
         if [ -z "$BIN_PATH" ]; then
-          echo "Error: badvpn-tun2socks binary not found sama sekali!"
+          echo "Error: badvpn-tun2socks binary not found!"
           exit 1
         fi
-        
-        echo "Found valid binary at: $BIN_PATH"
-        
-        # Membuat direktori usr/bin di dalam files passwall-ssh jika belum ada
         mkdir -p package/passwall-ssh/files/usr/bin/
-        
-        # Copy binary ke dalam passwall-ssh
         cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         chmod +x package/passwall-ssh/files/usr/bin/badvpn-tun2socks
-        
-        echo "Injection successful!"
 
-    - name: 3. Compile Passwall-SSH (Final APK)
+    - name: 3. Compile Passwall-SSH (${{ matrix.ext }})
       working-directory: sdk
       run: |
-        echo "Compiling Passwall-SSH with injected BadVPN..."
         make package/passwall-ssh/{clean,compile} -j$(nproc) V=s
 
     - name: Prepare Release Artifacts
       run: |
         mkdir -p release
         
-        # Temukan file passwall-ssh.apk yang sudah jadi
-        PASSWALL_APK=$(find sdk/bin/packages/ -name "passwall-ssh*.apk" | head -n 1)
-        
-        if [ -z "$PASSWALL_APK" ]; then
-          echo "Error: passwall-ssh APK not found!"
+        # Cari file hasil build berdasarkan ekstensinya (.ipk atau .apk)
+        PKG=$(find sdk/bin/packages/ -name "passwall-ssh*.${{ matrix.ext }}" | head -n 1)
+        if [ -z "$PKG" ]; then
+          echo "Error: file passwall-ssh*.${{ matrix.ext }} tidak ditemukan!"
           exit 1
         fi
         
-        cp "$PASSWALL_APK" release/
-        echo "Build ready:"
+        # Beri penamaan file yang jelas agar tidak tertukar di Release
+        FILENAME=$(basename "$PKG")
+        cp "$PKG" "release/passwall-ssh-openwrt${{ matrix.owrt }}_${FILENAME}"
         ls -lh release/
 
-    - name: Upload Artifacts
+    - name: Upload Artifacts per Matrix
       uses: actions/upload-artifact@v4
       with:
-        name: passwall-ssh-with-badvpn-${{ env.ARCH }}
+        name: passwall-ssh-openwrt-${{ matrix.owrt }}
         path: release/*
 
+  # Job kedua untuk menggabungkan dan merilis keduanya secara bersamaan
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: all-artifacts
+        merge-multiple: true
+
+    - name: Display downloaded files
+      run: ls -lh all-artifacts/
+
     - name: Create GitHub Release
-      if: success() && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: latest
-        name: Passwall-SSH (Built-in BadVPN)
+        name: Passwall-SSH (OpenWrt 24 & 25 Support)
+        body: |
+          ### Versi yang Tersedia:
+          - **Passwall-SSH for OpenWrt 24.x** (`.ipk`)
+          - **Passwall-SSH for OpenWrt 25.x** (`.apk`)
+          
+          *Sudah termasuk built-in BadVPN-Tun2Socks.*
         draft: false
         prerelease: false
         make_latest: true
         overwrite_files: true
-        files: release/*
+        files: all-artifacts/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
