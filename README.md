@@ -236,7 +236,7 @@ apk add --allow-untrusted /tmp/passwall-ssh_25_*.apk
 - Disable IPv6 before use
 - OpenSSH
 - BadVPN tun2socks
-- (Optional) Stunnel for TLS mode
+- Stunnel for TLS mode
 
 ---
 
