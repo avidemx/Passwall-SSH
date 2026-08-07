@@ -68,7 +68,7 @@ if not REMOTE_HOST or REMOTE_HOST == "" then
 end
 
 -- ==========================================
--- 3. PAYLOAD TRANSLATOR (STATIC PRE-PARSING)
+-- 3. SAFE ENHANCED PAYLOAD TRANSLATOR
 -- ==========================================
 local f, err = io.open(PAYLOAD_FILE, "rb")
 local RAW_PAYLOAD = ""
@@ -79,40 +79,122 @@ end
 
 local USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
--- Parsing statis sekali di awal untuk menghemat CPU
-local STATIC_PAYLOAD = RAW_PAYLOAD
-    :gsub("%[crlf%]", "\r\n")
-    :gsub("%[lf%]", "\n")
-    :gsub("%[cr%]", "\r")
-    :gsub("%[protocol%]", "HTTP/1.1")
-    :gsub("%[proxy%]", ENV.PROXY or "")
-    :gsub("%[proxy_port%]", ENV.PROXY_PORT or "")
-    :gsub("%[sni%]", ENV.SNI or "")
-    :gsub("%[ua%]", USER_AGENT)
+-- Inisialisasi seed acak sekali di awal (Aman untuk CPU 32-bit OpenWrt)
+local t_sec = os.time()
+local t_ms = math.floor((socket.gettime() % 1) * 1000)
+math.randomseed(t_sec + t_ms)
+
+local function generate_ws_key()
+    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local key = {}
+    for i = 1, 22 do
+        local rand = math.random(1, #chars)
+        table.insert(key, chars:sub(rand, rand))
+    end
+    table.insert(key, "==")
+    return table.concat(key)
+end
+
+-- Helper: Pengganti string aman Lua (mencegah crash % capture index)
+local function safe_sub(str, pattern, repl)
+    if not str then return "" end
+    return (str:gsub(pattern, function() return tostring(repl or "") end))
+end
+
+-- 1. Penanganan Pengulangan Token [token*N] (misal: [crlf*2])
+local function expand_multipliers(payload)
+    if not payload then return "" end
+    return payload:gsub("%[([%w_%-]+)%*(%d+)%]", function(token, count)
+        local n = tonumber(count) or 1
+        return string.rep("[" .. token .. "]", n)
+    end)
+end
+
+local RAW_EXPANDED = expand_multipliers(RAW_PAYLOAD)
+
+-- 2. Static Pre-parsing
+local STATIC_PAYLOAD = RAW_EXPANDED
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[crlf%]", "\r\n")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[lf%]", "\n")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[cr%]", "\r")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[protocol%]", "HTTP/1.1")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[ua%]", USER_AGENT)
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[proxy%]", ENV.PROXY or "")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[proxy_host%]", ENV.PROXY or "")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[proxy_port%]", ENV.PROXY_PORT or "")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni%]", ENV.SNI or "")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_host%]", ENV.SNI or "")
+STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_port%]", "443")
 
 local rotate_index = 0
 
-local function parse_tags_dynamic(payload, host, port)
+-- 3. Dynamic Token Parsing (Aman & Stabil)
+local function parse_tags_dynamic(payload, host, port, client_raw_request)
     if not payload then return "" end
+    
     local SSH_HOST = ENV.HOST or host or ""
-    local SSH_PORT = ENV.HOST_PORT or port or 80
+    local SSH_PORT = tostring(ENV.HOST_PORT or port or 80)
+    local SSH_HOST_PORT = SSH_HOST .. ":" .. SSH_PORT
 
-    return payload
-        :gsub("%[host%]", SSH_HOST)
-        :gsub("%[port%]", tostring(SSH_PORT))
-        :gsub("%[host_port%]", SSH_HOST .. ":" .. tostring(SSH_PORT))
-        :gsub("%[host_no_port%]", SSH_HOST)
-        :gsub("%[rotate=([^%]]+)%]", function(list)
-            local hosts = {}
-            for h in list:gmatch("[^;]+") do table.insert(hosts, h) end
-            if #hosts > 0 then
-                rotate_index = (rotate_index % #hosts) + 1
-                return hosts[rotate_index]
-            end
-            return ""
-        end)
+    -- Deteksi Method HTTP Valid (Abaikan banner SSH-2.0)
+    local method = "GET"
+    if client_raw_request and client_raw_request ~= "" then
+        local m = client_raw_request:match("^([A-Z]+)%s+")
+        if m and m ~= "SSH" then 
+            method = m 
+        elseif client_raw_request:find("^CONNECT") then
+            method = "CONNECT"
+        end
+    end
+
+    local res = payload
+    -- Server & SSH Alias
+    res = safe_sub(res, "%[host%]", SSH_HOST)
+    res = safe_sub(res, "%[server%]", SSH_HOST)
+    res = safe_sub(res, "%[ssh%]", SSH_HOST)
+    res = safe_sub(res, "%[ssh_host%]", SSH_HOST)
+    res = safe_sub(res, "%[ip%]", SSH_HOST)
+    res = safe_sub(res, "%[host_no_port%]", SSH_HOST)
+    
+    res = safe_sub(res, "%[port%]", SSH_PORT)
+    res = safe_sub(res, "%[ssh_port%]", SSH_PORT)
+    
+    res = safe_sub(res, "%[host_port%]", SSH_HOST_PORT)
+    res = safe_sub(res, "%[ip_port%]", SSH_HOST_PORT)
+    
+    -- WebSocket & Request Tokens
+    res = (res:gsub("%[ws_key%]", generate_ws_key))
+    res = (res:gsub("%[ws%-key%]", generate_ws_key))
+    res = safe_sub(res, "%[method%]", method)
+    res = safe_sub(res, "%[raw%]", client_raw_request or "")
+    res = safe_sub(res, "%[real_raw%]", client_raw_request or "")
+    res = safe_sub(res, "%[realData%]", client_raw_request or "")
+    res = safe_sub(res, "%[netData%]", client_raw_request or "")
+
+    -- Evaluator Rotate & Random
+    res = res:gsub("%[rotate=([^%]]+)%]", function(list)
+        local items = {}
+        for item in list:gmatch("[^;]+") do table.insert(items, item) end
+        if #items > 0 then
+            rotate_index = (rotate_index % #items) + 1
+            return items[rotate_index]
+        end
+        return ""
+    end)
+
+    res = res:gsub("%[random=([^%]]+)%]", function(list)
+        local items = {}
+        for item in list:gmatch("[^;]+") do table.insert(items, item) end
+        if #items > 0 then
+            return items[math.random(1, #items)]
+        end
+        return ""
+    end)
+
+    return res
 end
 
+-- INI ADALAH FUNGSI YANG SEBELUMNYA TERHAPUS
 local function generate_steps(payload, is_connect)
     local steps = {}
     local pos_ds = payload:find("%[delay_split%]", 1, true)
@@ -334,7 +416,7 @@ while true do
                                     session_pairs[remote] = sess
                                     table.insert(read_sockets, remote)
                                     
-                                    local translated_payload = parse_tags_dynamic(STATIC_PAYLOAD, host, port)
+                                    local translated_payload = parse_tags_dynamic(STATIC_PAYLOAD, host, port,chunk)
                                     sess.out_steps = generate_steps(translated_payload, sess.in_need_200)
                                     sess.out_state = "RUNNING"
                                     execute_sequence(sess)
