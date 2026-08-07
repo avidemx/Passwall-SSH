@@ -51,7 +51,7 @@ proxy:depends("proxy_type", "HTTP")
 
 -- Field Proxy Port (Hanya muncul jika Proxy = HTTP)
 proxy_port = s:option(Value, "proxy_port", "Port Proxy :")
-proxy_port.default = "8080"
+proxy_port.default = "80"
 proxy_port.datatype = "port"
 proxy_port:depends("proxy_type", "HTTP")
 
@@ -123,7 +123,7 @@ sni:depends("tls_type", "TLS")
 -- ADVANCED & PAYLOAD
 -- ==========================================
 udpgw_port = s:option(Value, "udpgw_port", "UDPGW Port :")
-udpgw_port.default = "7300"
+udpgw_port.default = "7500"
 udpgw_port.datatype = "port"
 
 payload = s:option(TextValue, "payload", "Payload :")

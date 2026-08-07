@@ -435,6 +435,28 @@ conf.anonymous = false
 
 conf.extedit = luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", "%s")
 
+function conf.create(self, section)
+    local created = TypedSection.create(self, section)
+    if created then
+        m.uci:save("passwall-ssh")
+        m.uci:commit("passwall-ssh")
+        local target_name = type(created) == "string" and created or section
+        luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", target_name))
+    end
+    return created
+end
+
+local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
+
+local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
+
+if not is_old_openwrt then
+    name_list = conf:option(DummyValue, "_name", "Name")
+    function name_list.cfgvalue(self, section)
+        return section
+    end
+end
+
 host_list = conf:option(DummyValue, "host", "Address")
 host_port_list = conf:option(DummyValue, "host_port", "Port")
 username_list = conf:option(DummyValue, "username", "Username")
