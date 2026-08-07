@@ -2,7 +2,7 @@
 
 SSH Tunnel ringan untuk OpenWrt dengan dukungan **HTTP Payload**, **TLS (Stunnel)**, **SOCKS5**, dan **BadVPN tun2socks**. Dioptimalkan agar stabil, hemat CPU/RAM, serta memiliki watchdog otomatis untuk menjaga koneksi tetap aktif.
 
-![Passwall-SSH]!(main.JPG)
+![Screenshot](main.JPG)
 
 ## ✨ Fitur
 
