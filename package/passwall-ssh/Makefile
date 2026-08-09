@@ -13,7 +13,7 @@ define Package/passwall-ssh
   SECTION:=net
   CATEGORY:=Network
   TITLE:=SSH Tunnel Client with Stunnel and BadVPN Tun2Socks
-  DEPENDS:=+sshpass +curl +openssh-client +stunnel +kmod-tun +dnsproxy +ip-full +lua +luasocket +luci-compat
+  DEPENDS:=+sshpass +curl +resolveip +openssh-client +stunnel +kmod-tun +dnsproxy +ip-full +lua +luasocket +luci-compat
   PKGARCH:=all
 endef
 
