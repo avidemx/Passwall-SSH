@@ -24,6 +24,7 @@ log() {
 
 trigger_stop() {
     log "Service stopped by Watchdog."
+    rm -f "$RETRY_FILE"
     /etc/init.d/passwall-ssh stop &
     exit 0
 }
@@ -67,6 +68,8 @@ trigger_restart() {
         if [ "$RETRY_COUNT" -ge 30 ]; then
             log "$REASON"
             log "Max restart limit (30x) reached. Force stopping service."
+            # Hapus file agar jika di-start manual nanti, kembali ke 0
+            rm -f "$RETRY_FILE"
             trigger_stop
         fi
         
@@ -76,10 +79,13 @@ trigger_restart() {
         log "$REASON"
         log "Preparing Restart (Attempt $RETRY_COUNT/30)"
 
+        # BENDERA: Beritahu init.d bahwa ini adalah ulah Watchdog, jangan reset hitungan!
+        touch /tmp/etc/passwall-ssh.is_retry
         /etc/init.d/passwall-ssh restart &
     else
         log "$REASON"
         log "Service Disabled | Stopping Service"
+        rm -f "$RETRY_FILE"
         /etc/init.d/passwall-ssh stop &
     fi
     exit 0
