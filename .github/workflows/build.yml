@@ -178,13 +178,7 @@ jobs:
         body: |
           # STABIL - Optimal Performance 🚀
 
-          * Menambahkan dukungan lebih banyak token HTTP Payload.
-          * Menambahkan evaluator payload `[random=a;b;c]`.
-          * Menambahkan dukungan pengulangan token seperti `[crlf*2]`, `[lf*N]`, dan `[cr*N]`.
-          * Menambahkan pembuatan otomatis `Sec-WebSocket-Key` (`[ws_key]`) untuk payload WebSocket.
-          * Menambahkan deteksi otomatis metode HTTP melalui token `[method]`.
-          * Meningkatkan kompatibilitas dengan payload **HTTP Custom**.
-          * Meningkatkan stabilitas parser payload serta memperbaiki crash akibat karakter `%` pada proses penggantian token.
+          * Perbaikan beberapa bug.
           ---
           ### Arsitektur & Versi yang Tersedia:
           - **OpenWrt 24.x** (`.ipk`)
