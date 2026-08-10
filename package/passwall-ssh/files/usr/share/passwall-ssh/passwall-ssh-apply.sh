@@ -1,12 +1,12 @@
 #!/bin/sh
 
-LOG_FILE="/tmp/passwall-ssh.log"
+LOG_FILE="/tmp/etc/passwall-ssh.log"
 
 # 1. Ambil nama profile yang sedang dipilih dari dropdown
 SELECTED=$(uci -q get passwall-ssh.main.selected_profile)
 
 if [ -z "$SELECTED" ]; then
-    echo "$(date '+[%H:%M:%S]') ==GAGAL== Tidak ada Profile Config yang dipilih!" >> $LOG_FILE
+    echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] FAILED: Failed to apply Profile configuration!</font>" >> "$LOG_FILE"
     exit 1
 fi
 
