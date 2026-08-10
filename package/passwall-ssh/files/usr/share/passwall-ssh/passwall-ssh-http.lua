@@ -5,12 +5,12 @@ local socket = require("socket")
 -- ==========================================
 -- 1. LOGGER UTILITIES
 -- ==========================================
-local LOG = "/tmp/passwall-ssh.log"
+local LOG = "/tmp/etc/passwall-ssh.log"
 
 local function log(msg)
     local f = io.open(LOG, "a")
     if f then
-        f:write(string.format("[%s] %s\n", os.date("%H:%M:%S"), msg))
+        f:write(string.format("[%s] %s\n", os.date("%Y-%m-%d %H:%M:%S"),msg))
         f:close()
     end
 end
