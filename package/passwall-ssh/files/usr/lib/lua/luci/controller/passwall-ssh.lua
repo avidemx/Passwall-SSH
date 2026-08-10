@@ -35,7 +35,9 @@ function action_check_services()
     
     local active_profile = uci:get("passwall-ssh", "main", "selected_profile") or "No Profile"
 
-    -- Cek status core (badvpn-tun2socks)
+    -- Folder sementara (RAM) untuk data "Current"
+    sys.exec("mkdir -p /tmp/state/passwall-ssh")
+
     local core = sys.call("pidof badvpn-tun2socks >/dev/null 2>&1") == 0 and "1" or "0"
 
     local iface = "tun0"
@@ -51,8 +53,9 @@ function action_check_services()
         if cur_rx ~= "" then rx = cur_rx end
         if cur_tx ~= "" then tx = cur_tx end
         
-        write_file("/tmp/etc/passwall-ssh_current_rx", rx)
-        write_file("/tmp/etc/passwall-ssh_current_tx", tx)
+        -- SIMPAN CURRENT DI RAM (/tmp) -> Aman dari flash wear
+        write_file("/tmp/state/passwall-ssh/current_rx", rx)
+        write_file("/tmp/state/passwall-ssh/current_tx", tx)
 
         -- 2. Ambil Start Time Epoch dari PID
         local pid = sys.exec("pidof badvpn-tun2socks | awk '{print $1}' 2>/dev/null"):gsub("%s+", "")
@@ -65,26 +68,37 @@ function action_check_services()
             if start_time == "" or not tonumber(start_time) then start_time = "0" end
         end
 
-        -- 3. Hitung durasi berjalannya koneksi & simpan ke file 'current'
+        -- 3. Hitung durasi berjalannya koneksi
         if start_time ~= "0" and tonumber(start_time) then
             local current_duration = os.time() - tonumber(start_time)
             if current_duration < 0 then current_duration = 0 end
-            write_file("/tmp/etc/passwall-ssh_current_conn", tostring(current_duration))
+            write_file("/tmp/state/passwall-ssh/current_conn", tostring(current_duration))
         end
-    else
-        -- 4. Jika VPN mati, pindahkan semua file 'Current' menjadi 'Last'
-        local check_rx = read_file("/tmp/etc/passwall-ssh_current_rx")
+     else
+        -- 4. Jika VPN mati, pindahkan file 'Current' menjadi 'Last' ke penyimpanan PERMANEN
+        local check_rx = read_file("/tmp/state/passwall-ssh/current_rx")
         if check_rx ~= "" and check_rx ~= "0" then
-            os.rename("/tmp/etc/passwall-ssh_current_rx", "/tmp/etc/passwall-ssh_last_rx")
-            os.rename("/tmp/etc/passwall-ssh_current_tx", "/tmp/etc/passwall-ssh_last_tx")
-            os.rename("/tmp/etc/passwall-ssh_current_conn", "/tmp/etc/passwall-ssh_last_conn")
+            
+            -- BACA SISA DATA
+            local check_tx = read_file("/tmp/state/passwall-ssh/current_tx")
+            local check_conn = read_file("/tmp/state/passwall-ssh/current_conn")
+
+            -- TULIS MANUAL KE FLASH (Karena os.rename gagal antar partisi)
+            write_file("/usr/share/passwall-ssh/last_rx", check_rx)
+            write_file("/usr/share/passwall-ssh/last_tx", check_tx)
+            write_file("/usr/share/passwall-ssh/last_conn", check_conn)
+
+            -- HAPUS FILE DI TMP AGAR TIDAK TERUS MENULIS
+            os.remove("/tmp/state/passwall-ssh/current_rx")
+            os.remove("/tmp/state/passwall-ssh/current_tx")
+            os.remove("/tmp/state/passwall-ssh/current_conn")
         end
     end
 
-    -- 5. Baca data history (Last RX, TX, dan Conn)
-    local last_rx = read_file("/tmp/etc/passwall-ssh_last_rx")
-    local last_tx = read_file("/tmp/etc/passwall-ssh_last_tx")
-    local last_conn = read_file("/tmp/etc/passwall-ssh_last_conn")
+    -- 5. Baca data history (Last RX, TX, dan Conn dari Flash storage)
+    local last_rx = read_file("/usr/share/passwall-ssh/last_rx")
+    local last_tx = read_file("/usr/share/passwall-ssh/last_tx")
+    local last_conn = read_file("/usr/share/passwall-ssh/last_conn")
     
     if last_rx == "" then last_rx = "0" end
     if last_tx == "" then last_tx = "0" end
@@ -92,7 +106,7 @@ function action_check_services()
 
     luci.http.prepare_content("text/plain")
     
-    -- Format output (core, dummy, dummy, profile, rx, tx, start_time, last_conn, last_rx, last_tx)
+    -- Format output
     luci.http.write(core .. ",0,0," .. active_profile .. "," .. rx .. "," .. tx .. "," .. start_time .. "," .. last_conn .. "," .. last_rx .. "," .. last_tx)
 end
 
