@@ -90,6 +90,14 @@ _start() {
     rm -f /tmp/etc/passwall-ssh.auth_failed
     rm -f /tmp/etc/passwall-ssh.kex_failed
 
+    if [ -f /tmp/etc/passwall-ssh.is_retry ]; then
+        # Ini ulah Watchdog, hapus benderanya saja, biarkan hitungan retry berlanjut
+        rm -f /tmp/etc/passwall-ssh.is_retry
+    else
+        # Tidak ada bendera, berarti ini restart MANUAL dari LuCI. Reset hitungan!
+        rm -f /tmp/etc/passwall-ssh.retry
+    fi
+
     sh /usr/share/passwall-ssh/passwall-ssh-apply.sh || return 1
 
     [ -f "$ENV_FILE" ] && . "$ENV_FILE"
@@ -101,7 +109,7 @@ _start() {
     write_log "----------------------------------------"
     write_log "Starting Service"
     write_log "Using Profile : $PROFILE_NAME"
-    write_log "Upstream Interface: $UPS_IF || IP: $UPS_IP"
+    write_log "Upstream Interface: $UPS_IF ($UPS_IP)"
     write_log "Connecting to server"
 
     # PERBAIKAN 2: Semua blocking loop (while ! netstat) DIHAPUS. Watchdog akan mengurusnya.
