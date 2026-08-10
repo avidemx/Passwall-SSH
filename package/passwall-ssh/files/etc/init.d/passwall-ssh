@@ -3,13 +3,12 @@
 START=90
 STOP=10
 
-LOG="/tmp/passwall-ssh.log"
-STATE_FILE="/tmp/passwall-ssh.state"
+LOG="/tmp/etc/passwall-ssh.log"
+STATE_FILE="/tmp/etc/passwall-ssh.state"
 ENV_FILE="/usr/share/passwall-ssh/passwall-ssh.env"
 LOCK="/var/run/passwall-ssh.control.lock"
 
-UPS_IP=$(ip route | awk '/default/ {print $3; exit}')
-UPS_IF=$(ip route | awk '/default/ {print $5; exit}')
+# (VARIABEL UPS_IP & UPS_IF DIHAPUS DARI SINI, DIPINDAHKAN KE DALAM _start)
 
 acquire_lock() {
     local count=0
@@ -29,7 +28,7 @@ release_lock() {
 }
 
 write_log() {
-    echo "<font color=\"#FFFFFF\">[$(date '+%H:%M:%S')] $*</font>" >> "$LOG"
+    echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] $*</span>" >> "$LOG"
 }
 
 _stop() {
@@ -47,6 +46,10 @@ _stop() {
     sh /usr/share/passwall-ssh/passwall-ssh.sh stop >/dev/null 2>&1
 
     # Kill SSH Clients, autossh, sshpass, dan nc (netcat)
+    if [ -f /var/run/passwall-ssh-client.pid ]; then
+        kill -9 $(cat /var/run/passwall-ssh-client.pid) >/dev/null 2>&1
+        rm -f /var/run/passwall-ssh-client.pid
+    fi
     killall -9 passwall-ssh-client.sh >/dev/null 2>&1
     for i in $(ps w | grep "[p]asswall-ssh-client.sh" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
     
@@ -56,18 +59,18 @@ _stop() {
     killall -9 nc >/dev/null 2>&1
 
     # Kill Lua HTTP
-    for i in $(ps w | grep "[p]asswall-ssh-http.lua" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
     if [ -f /var/run/passwall-http.pid ]; then
         kill -9 $(cat /var/run/passwall-http.pid) >/dev/null 2>&1
         rm -f /var/run/passwall-http.pid
     fi
+    for i in $(ps w | grep "[p]asswall-ssh-http.lua" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
 
     # Kill Stunnel
-    for i in $(ps w | grep "[s]tunnel /usr/share/passwall-ssh/stunnel.conf" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
     if [ -f /var/run/passwall-stunnel.pid ]; then
         kill -9 $(cat /var/run/passwall-stunnel.pid) >/dev/null 2>&1
         rm -f /var/run/passwall-stunnel.pid
     fi
+    for i in $(ps w | grep "[s]tunnel /usr/share/passwall-ssh/stunnel.conf" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
     
     echo "STOPPED" > "$STATE_FILE"
 }
@@ -84,40 +87,36 @@ _start() {
 
     echo "STARTING" > "$STATE_FILE"
     touch "$LOG"
-    rm -f /tmp/passwall-ssh.auth_failed
-    rm -f /tmp/passwall-ssh.kex_failed
+    rm -f /tmp/etc/passwall-ssh.auth_failed
+    rm -f /tmp/etc/passwall-ssh.kex_failed
 
-    sh /usr/share/passwall-ssh/passwall-ssh-apply.sh || {
-        write_log "FAILED: Failed to apply Profile configuration."
-        return 1
-    }
+    sh /usr/share/passwall-ssh/passwall-ssh-apply.sh || return 1
 
     [ -f "$ENV_FILE" ] && . "$ENV_FILE"
     
+    # PERBAIKAN 1: Ambil IP Gateway dan Interface HANYA pada saat servis distart!
+    UPS_IP=$(ip route 2>/dev/null | awk '/default/ {print $3; exit}')
+    UPS_IF=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+    
     write_log "----------------------------------------"
-    echo "<font color=\"#00FFFF\">[$(date '+%H:%M:%S')] =Starting Service=</font>" >> "$LOG"
-    echo "<font color=\"#B308FF\">[$(date '+%H:%M:%S')] Using Profile : $PROFILE_NAME</font>" >> "$LOG"
-    echo "<font color=\"#FFFF00\">[$(date '+%H:%M:%S')] Upstream Interface: $UPS_IF || IP: $UPS_IP </font>" >> "$LOG"
+    write_log "Starting Service"
+    write_log "Using Profile : $PROFILE_NAME"
+    write_log "Upstream Interface: $UPS_IF || IP: $UPS_IP"
     write_log "Connecting to server"
 
+    # PERBAIKAN 2: Semua blocking loop (while ! netstat) DIHAPUS. Watchdog akan mengurusnya.
     if [ "$TRANSPORT" = "TLS" ]; then
         stunnel /usr/share/passwall-ssh/stunnel.conf &
         echo $! > /var/run/passwall-stunnel.pid
-        
-        while ! netstat -tln 2>/dev/null | grep -q ":4444 "; do sleep 1; done
-        write_log "SSL handshakes with $SNI"
     fi
 
     lua /usr/share/passwall-ssh/passwall-ssh-http.lua &
     echo $! > /var/run/passwall-http.pid
-    
-    while ! netstat -tln 2>/dev/null | grep -q ":8080 "; do sleep 1; done
 
-    sh /usr/share/passwall-ssh/passwall-ssh-client.sh &
-    echo $! > /var/run/passwall-ssh-client.pid
-
+    # Jalankan Watchdog SEGERA tanpa ditunda oleh apapun
     /usr/share/passwall-ssh/watchdog.sh &
     echo $! > /var/run/passwall-ssh-watchdog.pid
+
 }
 
 start() {
