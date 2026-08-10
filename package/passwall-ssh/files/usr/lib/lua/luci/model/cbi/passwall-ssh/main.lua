@@ -1,7 +1,7 @@
 local fs = require "nixio.fs"
 local sys = require "luci.sys"
 
-m = Map("passwall-ssh", "PASSWALL-SSH")
+m = Map("passwall-ssh")
 
 -- ==========================================
 -- HOOK TRIGGER SAVE & APPLY 
@@ -33,40 +33,82 @@ header_ui.cfgvalue = function()
     .cbi-section-table th { background: rgba(128, 128, 128, 0.1); color: inherit; font-size: 13px; font-weight: bold; }
     .cbi-section-table tr:hover { background: rgba(128, 128, 128, 0.05); }
 
-    .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 20px; color: inherit; }
+    .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 0px; color: inherit; }
 
-    .pw-panel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; background: transparent; padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); width: 100%; box-sizing: border-box; }
+    /* GRID DIUBAH JADI 4 KOLOM */
+    .pw-panel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 15px; background: transparent; padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); width: 100%; box-sizing: border-box; }
     @media screen and (max-width: 768px) { .pw-panel { grid-template-columns: repeat(2, 1fr); } }
     @media screen and (max-width: 480px) { .pw-panel { grid-template-columns: 1fr; } }
 
     .pw-box { display: flex; align-items: center; background: rgba(128, 128, 128, 0.05); padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); transition: 0.2s; }
-    .pw-icon { width: 30px; height: 30px; margin-right: 15px; color: inherit; opacity: 0.7; display: flex; align-items: center; justify-content: center; }
+    .pw-icon { width: 35px; height: 35px; margin-right: 15px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+    .pw-icon img { width: 100%; height: 100%; object-fit: contain; }
     .pw-info { display: flex; flex-direction: column; }
     .pw-title { font-size: 12px; color: inherit; opacity: 0.7; margin-bottom: 4px; font-weight: bold; }
     .pw-val { font-size: 14px; font-weight: bold; transition: 0.2s; }
     
     .pw-box.clickable { cursor: pointer; }
-    .pw-box.clickable:hover { background: rgba(128, 128, 128, 0.15); border-color: rgba(128, 128, 128, 0.4); }
-    .pw-box.clickable .pw-icon { color: #5bc0de; opacity: 1; }
+    .pw-box.clickable .pw-icon { opacity: 0.7; }
+    .pw-box.clickable:hover .pw-icon { opacity: 1; transform: scale(1.1); }
+    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 0px; flex-wrap: wrap; padding-bottom: 0px; gap: 15px; }
+    
+    /* ===== TAB CONTAINER ===== */
+    .cbi-tabmenu {
+        display: flex;
+        color: inherit !important;
+        gap: 3px;
+    }
 
-    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; border-bottom: 1px solid rgba(128, 128, 128, 0.3); margin-bottom: 15px; flex-wrap: wrap; padding-bottom: 10px; gap: 15px; }
-    
-    .cbi-tabmenu { list-style: none; padding: 0; margin: 0; display: flex; border-bottom: none; }
-    .cbi-tabmenu li { margin-right: 2px; }
-    .cbi-tabmenu li a { display: block; padding: 6px 15px; text-decoration: none; color: inherit; opacity: 0.6; border: 1px solid transparent; border-bottom: none; font-size: 13px; }
-    .cbi-tabmenu li.active a { color: #5bc0de !important; border-color: rgba(128, 128, 128, 0.3); border-bottom: 1px solid transparent; margin-bottom: -1px; background: rgba(128, 128, 128, 0.05); opacity: 1; }
-    
+    /* ===== TAB ===== */
+    .cbi-tabmenu > li {
+        color: inherit !important;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* ===== TAB LINK ===== */
+    .cbi-tabmenu > li > a {
+        display: block;
+        padding: 8px 16px;
+        line-height: 18px;
+        color: inherit !important;
+        text-decoration: none;
+        background: rgba(128,128,128,.06);
+        border: 1px solid rgba(128,128,128,.25);
+        border-bottom-color: rgba(128,128,128,.25);
+        border-radius: 4px 4px 0 0;
+        box-shadow: inset 0 1px rgba(255,255,255,.08);
+        transition: all .2s ease;
+    }
+
+    /* ===== HOVER ===== */
+    .cbi-tabmenu > li:hover > a {
+        background: rgba(128,128,128,.12);
+    }
+
+    /* ===== ACTIVE ===== */
+    .cbi-tabmenu > li.active > a {
+        color: #00AEFF !important;
+        background: transparent;
+        border-color: rgba(128,128,128,.25);
+        border-top:2px solid #00AEFF;
+        padding-top:7px;
+        margin-bottom: -1px;
+        box-shadow: 0 -1px 3px rgba(0,0,0,.05);
+        font-weight: 600;
+    } 
+   
     .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; }
     .profile-text .p-name { font-weight: bold; color: inherit; margin-right: 5px; opacity: 1; }
     .profile-text .p-status { font-weight: bold; margin-left: 3px; }
 
     /* STYLING WIDGET IP & ANIMASI */
-    #ip-widget-placeholder { display: flex; align-items: center; justify-content: center; margin-bottom: 25px; width: 100%; }
+    #ip-widget-placeholder { display: flex; align-items: center; justify-content: center; margin-bottom: 15px; width: 100%; }
     
     .status-bar { 
         background: rgba(128, 128, 128, 0.05); 
         border: 1px solid rgba(128, 128, 128, 0.2); 
-        border-radius: 4px;            
+        border-radius: 4px;             
         padding: 10px 15px; 
         color: inherit;
         display: flex; 
@@ -81,15 +123,15 @@ header_ui.cfgvalue = function()
     .flag { height: 20px; width: 28px; display: flex; align-items: center; justify-content: center; overflow: hidden; } 
     .flag img { height: 100%; width: 100%; object-fit: contain; border-radius: 2px; }
 
-    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
+    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; text-shadow: none; }
     .separator { color: inherit; opacity: 0.5; font-weight: normal; text-shadow: none; }
 
     .text-offline { color: #ff4c4c !important; }
-    .text-online { color: #4caf50 !important; }
+    .text-online { color: #06BA06 !important; }
     
-    /* Warna Kustom Country (Biru) & ISP (Pink) */
-    .text-country { color: #4da6ff !important; }
-    .text-isp-name { color: #ff99cc !important; }
+    /* Warna Kustom Country & ISP */
+    .text-country { color: inherit !important; }
+    .text-isp-name { color: #C7AF0C !important; }
 
     @keyframes spin-globe { 100% { transform: rotate(360deg); } }
     @keyframes wave-flag { 
@@ -100,18 +142,19 @@ header_ui.cfgvalue = function()
     .spin-anim { animation: spin-globe 1.5s linear infinite; height: 20px !important; width: 20px !important; }
     .wave-anim { animation: wave-flag 2.5s ease-in-out infinite; transform-origin: bottom left; }
     
-    /* KOTAK LOG DIBUAT GELAP AGAR TULISAN PUTIH TERBACA JELAS */
+    /* KOTAK LOG */
+    #log_box,
+
     #log_box {
-        background-color: #1a1a1a !important; 
-        color: #e0e0e0 !important; 
-        padding: 10px; 
-        font-family: monospace; 
-        height: 450px; 
-        overflow-y: scroll; 
-        border-radius: 4px; 
-        white-space: pre-wrap; 
-        font-size: 12px; 
-        border: 1px solid rgba(128, 128, 128, 0.4);
+        background: transparent !important;
+        padding: 10px;
+        font-family: monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        height: 450px;
+        border-radius: 4px;
+        border: 1px solid rgba(128,128,128,.4);
     }
 
     /* FIX HIDE FIELDS MANAGEMENT */
@@ -121,34 +164,52 @@ header_ui.cfgvalue = function()
     .hide-dns-fields #cbi-passwall-ssh-main-dns_proto,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_ip,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_url { display: none !important; }
+
+    /* --- FIX JARAK ANTARA TAB DAN KONTEN BAWAH --- */
+    .cbi-map {
+        padding-top: 0 !important;
+    }
+    .cbi-section, .cbi-map-section {
+       margin-top: -8px !important; /* Gunakan minus untuk menarik konten ke atas */
+       padding-top: 0 !important;
+    }
+    fieldset.cbi-section legend {
+       margin-bottom: 0 !important;
+       padding-bottom: 0 !important;
+    }
+
+    .cbi-tabmenu {
+       border-bottom: none !important;
+    }
+
     </style>
 
     <div class="full-width-container">
-        <!-- Status Panel -->
+    <!-- Status Panel -->
         <div class="pw-panel">
             <div class="pw-box">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-                <div class="pw-info"><span class="pw-title">TCP Core</span><span class="pw-val" id="status-tcp" style="color:#ff4c4c;">Check...</span></div>
-            </div>
-            <div class="pw-box">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-                <div class="pw-info"><span class="pw-title">UDP Core</span><span class="pw-val" id="status-udp" style="color:#ff4c4c;">Check...</span></div>
-            </div>
-            <div class="pw-box">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div>
-                <div class="pw-info"><span class="pw-title">DNS Resolver</span><span class="pw-val" id="status-dns" style="color:#ff4c4c;">Check...</span></div>
+                <div class="pw-icon">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzM4YmRmOCI+PHBhdGggZD0iTTIuMDEgMjFMMjMgMTIgMi4wMSAzIDIgMTBsMTUgMi0xNSAyeiIvPjwvc3ZnPg==">
+                </div>
+                <div class="pw-info"><span class="pw-title">CORE</span><span class="pw-val" id="status-core" style="color:#ff4c4c;">Check...</span></div>
             </div>
 
-            <div class="pw-box clickable" onclick="touchCheck('www.google.com', 'status-google')">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+            <div class="pw-box clickable" onclick="touchCheck('https://www.google.com', 'status-google')">
+                <div class="pw-icon">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iIzQyODVGNCIgZD0iTTIyLjU2IDEyLjI1YzAtLjc4LS4wNy0xLjUzLS4yLTIuMjVIMTJ2NC4yNmg1LjkyYy0uMjYgMS4zNy0xLjA0IDIuNTMtMi4yMSAzLjMxdjIuNzdoMy41N2MyLjA4LTEuOTIgMy4yOC00Ljc0IDMuMjgtOC4wOXoiLz48cGF0aCBmaWxsPSIjMzRBODUzIiBkPSJNMTIgMjNjMi45NyAwIDUuNDYtLjk4IDcuMjgtMi42NmwtMy41Ny0yLjc3Yy0uOTguNjYtMi4yMyAxLjA2LTMuNzEgMS4wNi0yLjg2IDAtNS4yOS0xLjkzLTYuMTYtNC41M0gyLjE4djIuODRDMy45OSAyMC41MyA3LjcwIDIzIDEyIDIzeiIvPjxwYXRoIGZpbGw9IiNGQkJDMDUiIGQ9Ik01Ljg0IDE0LjA5Yy0uMjItLjY2LS4zNS0xLjM2LS4zNS0yLjA5cy4xMy0xLjQzLjM1LTIuMDlWNy4wN0gyLjE4QzEuNDMgOC41NSAxIDEwLjIyIDEgMTJzLjQzIDMuNDUgMS4xOCA0LjkzbDIuODUtMi4yMi44MS0uNjJ6Ii8+PHBhdGggZmlsbD0iI0VBNDMzNSIgZD0iTTEyIDUuMzhjMS42MiAwIDMuMDYuNTYgNC4yMSAxLjY0bDMuMTUtMy4xNUMxNy40NSAyLjA5IDE0Ljk3IDEgMTIgMSA3LjcwIDEgMy45OSAzLjQ3IDIuMTggNy4wN2wzLjY2IDIuODRjLjg3LTIuNjAgMy4zLTQuNTMgNi4xNi00LjUzeiIvPjwvc3ZnPg==">
+                </div>
                 <div class="pw-info"><span class="pw-title">Google</span><span class="pw-val" id="status-google" style="color:#5bc0de;">Touch to Check</span></div>
             </div>
-            <div class="pw-box clickable" onclick="touchCheck('www.github.com', 'status-github')">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg></div>
+            <div class="pw-box clickable" onclick="touchCheck('https://www.github.com', 'status-github')">
+                <div class="pw-icon">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIj48cGF0aCBkPSJNMTIgMkM2LjQ3NyAyIDIgNi40NzcgMiAxMmMwIDQuNDIgMi44NjUgOC4xNjYgNi44MzkgOS40ODkuNS4wOTIuNjgyLS4yMTcuNjgyLS40ODIgMC0uMjM3LS4wMDgtLjg2Ni0uMDEzLTEuNy0yLjc4Mi42MDMtMy4zNjktMS4zNC0zLjM2OS0xLjM0LS40NTQtMS4xNTYtMS4xMS0xLjQ2Mi0xLjExLTEuNDYyLS45MDgtLjYyLjA2OS0uNjA4LjA2OS0uNjA4IDEuMDAzLjA3IDEuNTMxIDEuMDMgMS41MzEgMS4wMy44OTIgMS41MjkgMi4zNDEgMS4wODcgMi45MS44MzEuMDkyLS42NDYuMzUtMS4wODYuNjM2LTEuMzM2LTIuMjItLjI1My00LjU1NS0xLjExLTQuNTU1LTQuOTQzIDAtMS4wOTEuMzktMS45ODQgMS4wMjktMi42ODMtLjEwMy0uMjUzLS40NDYtMS4yNy4wOTgtMi42NDcgMCAwIC44NC0uMjY5IDIuNzUgMS4wMjVBOS41NzggOS41NzggMCAwMTEyIDYuODM2Yy44NS4wMDQgMS43MDUuMTE0IDIuNTA0LjMzNiAxLjkwOS0xLjI5NCAyLjc0Ny0xLjAyNSAyLjc0Ny0xLjAyNS41NDYgMS4zNzcuMjAzIDIuMzk0LjEgMi42NDcuNjQuNjk5IDEuMDI4IDEuNTkyIDEuMDI4IDIuNjgzIDAgMy44NDItMi4zMzkgNC42ODctNC41NjYgNC45MzUuMzU5LjMwOS42NzguOTE5LjY3OCAxLjg1MiAwIDEuMzM2LS4wMTIgMjAuNDE1LS4wMTIgMjAuNzQzIDAgLjI2Ny4xOC41NzguNjg4LjQ4QzE5LjEzOCAyMC4xNjEgMjIgMTYuNDE2IDIyIDEyYzAtNS41MjMtNC40NzctMTAtMTAtMTB6Ii8+PC9zdmc+">
+                </div>
                 <div class="pw-info"><span class="pw-title">Github</span><span class="pw-val" id="status-github" style="color:#5bc0de;">Touch to Check</span></div>
             </div>
-            <div class="pw-box clickable" onclick="touchCheck('www.youtube.com', 'status-youtube')">
-                <div class="pw-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33 2.78 2.78 0 0 0 1.94 2c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"/></svg></div>
+            <div class="pw-box clickable" onclick="touchCheck('https://www.youtube.com', 'status-youtube')">
+                <div class="pw-icon">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmMDAwMCI+PHBhdGggZD0iTTIxLjU4IDYuNTVjLS4yMy0uODYtLjkxLTEuNTQtMS43Ny0xLjc3QzE4LjI1IDQuMzMgMTIgNC4zMyAxMiA0LjMzcy02LjI1IDAtNy44MS40NWMtLjg2LjIzLTEuNTQuOTEtMS43NyAxLjc3QzIgOC4xMSAyIDEyIDIgMTJzMCAzLjg5LjQyIDUuNDVjLjIzLjg2LjkxIDEuNTQgMS43NyAxLjc3IDEuNTYuNDUgNy44MS40NSA3LjgxLjQ1czYuMjUgMCA3LjgxLS40NWMuODYtLjIzIDEuNTQtLjkxIDEuNzctMS43Ny40Mi0xLjU2LjQyLTUuNDUuNDItNS40NXMwLTMuODktLjQyLTUuNDV6TTkuOTkgMTUuNXYtN2w2LjUgMy41LTYuNSAzLjV6Ii8+PC9zdmc+">
+                </div>
                 <div class="pw-info"><span class="pw-title">Youtube</span><span class="pw-val" id="status-youtube" style="color:#5bc0de;">Touch to Check</span></div>
             </div>
         </div>
@@ -162,11 +223,46 @@ header_ui.cfgvalue = function()
                     </div>
                     <div class="ip-info-container">
                         <div id="widget-ip-text" class="text-offline">Loading...</div>
-                        <div class="separator">|</div>
-                        <div id="widget-info-text" class="text-offline">Menunggu data...</div>
+                        <div id="widget-separator" class="separator" style="display: none;">|</div>
+                        <div id="widget-info-text" class="text-offline" style="display: none;"></div>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- Widget Stats -->
+        <div id="stats-widget-container" class="status-bar" style="justify-content: space-between !important; margin-bottom: 25px; display: flex; width: 100%;">
+            
+            <!-- 1. KIRI: Connection Time -->
+            <div style="display: flex; flex-direction: column; text-align: left; gap: 3px; flex: 1;">
+                <div style="font-size: 13px; font-weight: bold;">
+                    <span style="opacity: 1;">Connection Time:</span>
+                    <span id="conn-time-val" style="color: #4caf50;">00:00:00</span>
+                </div>
+                <div style="font-size: 12px; opacity: 0.8;">
+                    <span>Last Connection Time :</span>
+                    <span id="last-conn-time-val">00:00:00</span>
+                </div>
+            </div>
+
+            <!-- 2. TENGAH: Profile Status -->
+            <div class="profile-text" style="margin-left: 0; justify-content: center; flex: 1; display: flex; align-items: center;">
+                <span class="p-name">]=] .. active_profile .. [=[</span> :
+                <span class="p-status" id="profile-status" style="color:#888;">Checking...</span>
+            </div>
+
+            <!-- 3. KANAN: RX TX -->
+            <div style="display: flex; flex-direction: column; text-align: right; gap: 3px; flex: 1;">
+                <div style="display: flex; justify-content: flex-end; gap: 15px; font-size: 13px; font-weight: bold;">
+                    <div><span style="color: #4da6ff;">↓ RX:</span> <span id="rx-val">0 B</span></div>
+                    <div><span style="color: #FAAF00;">↑ TX:</span> <span id="tx-val">0 B</span></div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 15px; font-size: 12px; opacity: 0.8;">
+                    <div>Last RX: <span id="last-rx-val">0 B</span></div>
+                    <div>Last TX: <span id="last-tx-val">0 B</span></div>
+                </div>
+            </div>
+            
         </div>
 
         <!-- TOOLBAR TABS -->
@@ -177,49 +273,93 @@ header_ui.cfgvalue = function()
                 <li id="tab_config"><a href="javascript:void(0)" onclick="switchTab('config')">Profile</a></li>
                 <li id="tab_log"><a href="javascript:void(0)" onclick="switchTab('log')">Log</a></li>
             </ul>
-
-            <div class="profile-text">
-                <span class="p-name">]=] .. active_profile .. [=[</span> :
-                <span class="p-status" id="profile-status" style="color:#888;">Checking...</span>
-            </div>
         </div>
 
         <!-- Log Container -->
         <div id="log-container" style="display: none;">
-            <div style="font-weight: bold; margin-bottom: 5px; color: inherit; opacity: 0.9;">LOG (Auto Clean) :</div>
-            <div id="log_box">Loading...</div>
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 13px;">
+                <button type="button" class="cbi-button cbi-button-remove" onclick="clearLog()" style="padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;">Clear Logs</button>
+            </div>
+            <div id="log_box"></div>
         </div>
     </div>
 
     <script type="text/javascript">
-        const loadingGlobeURI = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgd2lkdGg9JzI0JyBoZWlnaHQ9JzI0JyBzdHJva2U9JyNmZmZmZmYnIHN0cm9rZS13aWR0aD0nMicgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBzdHJva2UtbGluZWpvaW49J3JvdW5kJz48Y2lyY2xlIGN4PScxMicgY3k9JzEyJyByPScxMCcvPjxwYXRoIGQ9J00xMiAyYTE1LjMgMTUuMyAwIDAgMSA0IDEwIDE1LjMgMTUuMyAwIDAgMS00IDEwIDE1LjMgMTUuMyAwIDAgMS00LTEwIDE1LjMgMTUuMyAwIDAgMSA0LTEweicvPjxwYXRoIGQ9J00yIDEyaDIwJy8+PC9zdmc+";
+
+        const loadingGlobeURI = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQwIiBzdHJva2U9IiM4ODgiIHN0cm9rZS13aWR0aD0iOCIgZmlsbD0ibm9uZSIgb3BhY2l0eT0iMC4zIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iNDAiIHN0cm9rZT0iIzAwQUVGRiIgc3Ryb2tlLXdpZHRoPSI4IiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSI3MCAyMDAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==";
+        
         const CHECK_IP_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_ip") .. [=[';
         
         window.isFetchingIP = false;
+        var startTimeEpoch = 0;
+        var timerInterval = null;
+
+        function formatBytes(bytes) {
+            bytes = parseInt(bytes);
+            if (isNaN(bytes) || bytes <= 0) return "0 B";
+            var k = 1024;
+            var sizes = ["B", "KB", "MB", "GB", "TB"];
+            var i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+        }
+
+        function formatSeconds(sec) {
+            sec = parseInt(sec);
+            if (isNaN(sec) || sec <= 0) return "00:00:00";
+            var hrs = Math.floor(sec / 3600);
+            var mins = Math.floor((sec % 3600) / 60);
+            var secs = sec % 60;
+            
+            var hStr = hrs < 10 ? "0" + hrs : hrs;
+            var mStr = mins < 10 ? "0" + mins : mins;
+            var sStr = secs < 10 ? "0" + secs : secs;
+            
+            return hStr + ":" + mStr + ":" + sStr;
+        }
+
+        function startConnTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(function() {
+                var connTimeEl = document.getElementById("conn-time-val");
+                if (!connTimeEl) return;
+                if (startTimeEpoch > 0) {
+                    var now = Math.floor(Date.now() / 1000);
+                    var diff = now - startTimeEpoch;
+                    if (diff < 0) diff = 0;
+                    connTimeEl.innerText = formatSeconds(diff);
+                } else {
+                    connTimeEl.innerText = "00:00:00";
+                }
+            }, 1000);
+        }
 
         function write_status(data) {
             const flagImg = document.getElementById("flag-img-element");
             const ipText = document.getElementById("widget-ip-text");
             const infoText = document.getElementById("widget-info-text");
+            const sepText = document.getElementById("widget-separator");
             const pStatus = document.getElementById("profile-status");
             
             if (!flagImg || !ipText || !infoText) return;
 
-            if (data.ip === "Offline" || !data.ip) {
+            // Jika statusnya Offline atau sedang Loading
+            if (data.ip === "Offline" || data.ip === "Loading..." || !data.ip) {
                 flagImg.src = loadingGlobeURI;
                 flagImg.className = "spin-anim";
                 
-                ipText.innerHTML = "Offline";
+                ipText.innerHTML = data.ip || "Offline";
                 ipText.className = "text-offline";
                 
-                infoText.innerHTML = "Offline";
-                infoText.className = "text-offline";
+                // Sembunyikan garis pemisah "|" dan info negara/ISP
+                if (sepText) sepText.style.display = "none";
+                infoText.style.display = "none";
                 
                 if(pStatus) {
-                    pStatus.innerHTML = "Disconnected";
-                    pStatus.style.color = "#ff4c4c";
+                    pStatus.innerHTML = (data.ip === "Loading...") ? "Checking..." : "Disconnected";
+                    pStatus.style.color = (data.ip === "Loading...") ? "#888" : "#ff4c4c";
                 }
             } else {
+                // Jika statusnya Online
                 let countryCode = data.flag ? data.flag.toLowerCase() : "un"; 
                 
                 flagImg.src = 'https://flagcdn.com/w40/' + countryCode + '.png';
@@ -231,12 +371,15 @@ header_ui.cfgvalue = function()
                 ipText.innerHTML = data.ip;
                 ipText.className = "text-online";
                 
+                // Tampilkan kembali garis pemisah "|" dan info negara/ISP
+                if (sepText) sepText.style.display = "block";
+                infoText.style.display = "block";
                 infoText.innerHTML = '<span class="text-country">' + (data.country || "Unknown") + '</span> <span class="separator">|</span> <span class="text-isp-name">' + (data.isp || "Unknown") + '</span>';
                 infoText.className = ""; 
                 
                 if(pStatus) {
                     pStatus.innerHTML = "Connected";
-                    pStatus.style.color = "#4caf50";
+                    pStatus.style.color = "#06BA06";
                 }
             }
         }
@@ -245,7 +388,8 @@ header_ui.cfgvalue = function()
             if (window.isFetchingIP) return; 
             window.isFetchingIP = true;
             
-            write_status({ ip: "Offline" }); 
+            // Ubah menjadi "Loading..." saat proses ngecek IP (sebelumnya "Offline")
+            write_status({ ip: "Loading..." }); 
 
             fetch(CHECK_IP_URL)
                 .then(function(res) { return res.json(); })
@@ -296,7 +440,12 @@ header_ui.cfgvalue = function()
             }
 
             if (secConfig) secConfig.style.display = (tabName === 'config') ? 'block' : 'none';
-            if (secLog) secLog.style.display = (tabName === 'log') ? 'block' : 'none';
+            
+            // ---LOG INSTAN ---
+            if (secLog) {
+                secLog.style.display = (tabName === 'log') ? 'block' : 'none';
+                if (tabName === 'log') updateLog(); 
+            }
         }
 
         function touchCheck(host, elId) {
@@ -328,15 +477,50 @@ header_ui.cfgvalue = function()
             xhr.open('GET', ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_services") .. [=[', true);
             xhr.onreadystatechange = function() {
                 if (xhr.readyState === 4 && xhr.status === 200) {
-                    var parts = xhr.responseText.trim().split(',');
-                    if(parts.length >= 3) {
-                        updateServiceBadge('status-tcp', parts[0]);
-                        updateServiceBadge('status-udp', parts[1]);
-                        updateServiceBadge('status-dns', parts[2]);
+                    var raw = xhr.responseText.trim();
+                    var parts = raw.split(',');
+
+                    if(parts.length >= 1) {
+                        updateServiceBadge('status-core', parts[0]);
 
                         if (parts[3]) {
                             var pName = document.querySelector('.p-name');
                             if (pName) pName.innerHTML = parts[3];
+                        }
+
+                        var rxVal = (parts.length > 4) ? parseInt(parts[4]) : 0;
+                        var txVal = (parts.length > 5) ? parseInt(parts[5]) : 0;
+                        var startVal = (parts.length > 6) ? parseInt(parts[6]) : 0;
+                        var lastConnVal = (parts.length > 7) ? parseInt(parts[7]) : 0;
+                        var lastRxVal = (parts.length > 8) ? parseInt(parts[8]) : 0;
+                        var lastTxVal = (parts.length > 9) ? parseInt(parts[9]) : 0;
+
+                        var rxEl = document.getElementById("rx-val");
+                        var txEl = document.getElementById("tx-val");
+                        var lastConnEl = document.getElementById("last-conn-time-val");
+                        var lastRxEl = document.getElementById("last-rx-val");
+                        var lastTxEl = document.getElementById("last-tx-val");
+
+                        if (parts[0] === "1") {
+                            if (rxEl) rxEl.innerText = formatBytes(rxVal);
+                            if (txEl) txEl.innerText = formatBytes(txVal);
+                            startTimeEpoch = startVal;
+                        } else {
+                            if (rxEl) rxEl.innerText = "0 B";
+                            if (txEl) txEl.innerText = "0 B";
+                            startTimeEpoch = 0;
+                            var connTimeEl = document.getElementById("conn-time-val");
+                            if (connTimeEl) connTimeEl.innerText = "00:00:00";
+                        }
+
+                        if (lastConnEl) {
+                            lastConnEl.innerText = formatSeconds(lastConnVal);
+                        }
+                        if (lastRxEl) {
+                            lastRxEl.innerText = formatBytes(lastRxVal);
+                        }
+                        if (lastTxEl) {
+                            lastTxEl.innerText = formatBytes(lastTxVal);
                         }
 
                         var isRunning = (parts[0] === "1"); 
@@ -368,25 +552,37 @@ header_ui.cfgvalue = function()
                     var formattedLines = [];
                     for (var i = 0; i < lines.length; i++) {
                         if (lines[i].trim() === "") continue;
-                        
-                        /* KEMBALIKAN KE WARNA ABU-ABU TERANG SECARA ABSOLUT AGAR TIDAK BOCOR HIJAU */
-                        var color = "#e0e0e0"; 
-                        if (lines[i].indexOf("GAGAL") >= 0 || lines[i].indexOf("ERROR") >= 0 || lines[i].indexOf("STOPPED") >= 0) color = "#ff4c4c"; 
-                        else if (lines[i].indexOf("sukses") >= 0 || lines[i].indexOf("OK") >= 0 || lines[i].indexOf("RUNNING") >= 0) color = "#4caf50";
-                        
-                        var processedLine = lines[i].replace(/(\[[0-9]{2}:[0-9]{2}:[0-9]{2}\])/g, '<span style="color: #888;">$1</span>');
-                        formattedLines.push('<span style="color: ' + color + ';">' + processedLine + '</span>');
+                        var processedLine = lines[i].replace(
+                            /(\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\])/g,
+                            '<span style="color: #3C86AB">$1</span>'
+                        );
+                        formattedLines.push('<span>' + processedLine + '</span>');
                     }
-                    box.innerHTML = formattedLines.join('<br>');
+                    box.innerHTML = formattedLines.join('\n');
                     if (isScrolledToBottom) box.scrollTop = box.scrollHeight;
                 }
             };
             xhr.send();
         }
+        
+        window.clearLog = function() {
+            var box = document.getElementById('log_box');
+            if (box) box.innerHTML = "";
             
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "clear_log") .. [=[', true);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    if (box) box.innerHTML = "";
+                }
+            };
+            xhr.send();
+        };
+    
         document.addEventListener('DOMContentLoaded', function() {
             switchTab(sessionStorage.getItem('passwall_active_tab') || 'main');
             window.forceCheckIP();
+            startConnTimer();
         });
 
         setInterval(checkServicesLoop, 3000);
@@ -402,11 +598,11 @@ s = m:section(NamedSection, "main", "sshtls", "<span id='marker-main'></span>")
 s.addremove = false
 
 -- --- OPSI UNTUK TAB MAIN ---
-enabled = s:option(Flag, "enabled", translate("Enable"))
+enabled = s:option(Flag, "enabled", translate("Main switch"))
 enabled.default = "0"
 enabled.rmempty = false
 
-sel = s:option(ListValue, "selected_profile", translate("Main Profile"))
+sel = s:option(ListValue, "selected_profile", translate("Profile"))
 sel.default = ""
 sel:value("", "-- Pilih Profile --")
 m.uci:foreach("passwall-ssh", "profile", function(p)
@@ -444,7 +640,7 @@ dns_url.default = "cloudflare-dns.com/dns-query"
 -- ==========================================
 -- SECTION CONFIG (Profile List)
 -- ==========================================
-conf = m:section(TypedSection, "profile", "<span id='marker-config'></span>" .. translate("Profile List"))
+conf = m:section(TypedSection, "profile", "<span id='marker-config'></span>")
 conf.template = "cbi/tblsection" 
 conf.addremove = true
 conf.anonymous = false
@@ -462,21 +658,17 @@ function conf.create(self, section)
     end
     return created
 end
--- =================================
 
 -- ====== DETEKSI VERSI OS UNTUK FIX KOLOM GANDA ======
 local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
--- Cek apakah sistem menggunakan OpenWrt 24, 23, 22, atau 21
 local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
 
--- Jika BUKAN OpenWrt lama (berarti OpenWrt 25 ke atas / SNAPSHOT), baru kita render kolom manual
 if not is_old_openwrt then
     name_list = conf:option(DummyValue, "_name", "Name")
     function name_list.cfgvalue(self, section)
         return section
     end
 end
--- ====================================================
 
 host_list = conf:option(DummyValue, "host", "Address")
 host_port_list = conf:option(DummyValue, "host_port", "Port")
