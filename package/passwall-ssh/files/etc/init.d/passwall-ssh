@@ -42,6 +42,12 @@ _stop() {
     killall -9 watchdog.sh >/dev/null 2>&1
     for i in $(ps w | grep "[w]atchdog.sh" | awk '{print $1}'); do kill -9 $i >/dev/null 2>&1; done
 
+    if [ -f /tmp/state/passwall-ssh/current_rx ]; then
+        mv /tmp/state/passwall-ssh/current_rx /usr/share/passwall-ssh/last_rx
+        mv /tmp/state/passwall-ssh/current_tx /usr/share/passwall-ssh/last_tx
+        mv /tmp/state/passwall-ssh/current_conn /usr/share/passwall-ssh/last_conn
+    fi
+
     # Kill Firewall & Rules
     sh /usr/share/passwall-ssh/passwall-ssh.sh stop >/dev/null 2>&1
 
