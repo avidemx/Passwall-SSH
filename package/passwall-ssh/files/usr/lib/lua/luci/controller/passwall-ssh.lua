@@ -167,32 +167,45 @@ function action_do_app_update()
     local uci = require "luci.model.uci".cursor()
     local dl_url = luci.http.formvalue("url") or ""
     
+    local sys_info = get_system_info()
+    local ext = sys_info.pkg_ext -- "apk" atau "ipk"
+    
     local sh_script = string.format([[
         URL="%s"
-        PKG_FILE="/tmp/passwall_update_pkg"
+        EXT="%s"
+        PKG_FILE="/tmp/passwall_update_pkg.${EXT}"
         
         # 1. Download Package
         rm -f /tmp/passwall_update_pkg*
         curl -skL -m 60 "$URL" -o "$PKG_FILE"
         if [ ! -s "$PKG_FILE" ]; then
-            echo "DOWNLOAD_FAILED"
+            echo "ERROR: Download failed or file empty"
             exit 1
         fi
         
-        # 2. Backup Config Settingan
+        # 2. Backup Config Settingan & State
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
-        
-        # 3. Cek Status Tunnel & Stop Service
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
+        
+        # 3. Stop Service Sebelum Update
         /etc/init.d/passwall-ssh stop >/dev/null 2>&1
         
-        # 4. Install Sesuai Package Manager
-        if echo "$URL" | grep -q '\.apk$' || command -v apk >/dev/null 2>&1; then
-            apk add --allow-untrusted --force-overwrite --upgrade "$PKG_FILE" >/dev/null 2>&1
-        elif echo "$URL" | grep -q '\.ipk$' || command -v opkg >/dev/null 2>&1; then
-            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/dev/null 2>&1
+        # 4. Install Sesuai Package Manager dengan Ekstensi Jelas
+        INSTALL_STATUS=0
+        if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
+            apk add --allow-untrusted --force-overwrite --upgrade "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            INSTALL_STATUS=$?
         else
-            tar -xzf "$PKG_FILE" -C / >/dev/null 2>&1
+            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            INSTALL_STATUS=$?
+        fi
+        
+        if [ $INSTALL_STATUS -ne 0 ]; then
+            # Kembalikan config jika install gagal
+            [ -f /tmp/passwall-ssh.bak ] && cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
+            ERR_MSG=$(cat /tmp/passwall_install.log | tr '\n' ' ')
+            echo "ERROR: Install failed - $ERR_MSG"
+            exit 1
         fi
         
         # 5. Restore Config
@@ -201,24 +214,26 @@ function action_do_app_update()
             rm -f /tmp/passwall-ssh.bak
         fi
         
-        # 6. Bersihkan temporary file
-        rm -f "$PKG_FILE"
+        # 6. Bersihkan file instalasi & Cache LuCI agar perubahan versi langsung terbaca
+        rm -f "$PKG_FILE" /tmp/passwall_install.log
+        rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
         
-        # 7. Start kembali jika enable == 1
+        # 7. Start kembali jika sebelumnya aktif
         if [ "$ENABLED" = "1" ]; then
             /etc/init.d/passwall-ssh start >/dev/null 2>&1 &
         fi
         
         echo "SUCCESS"
-    ]], dl_url)
+    ]], dl_url, ext)
     
-    local out = sys.exec(sh_script):gsub("%s+", "")
+    local out = sys.exec(sh_script)
+    local is_success = out:find("SUCCESS") ~= nil
     
     luci.http.prepare_content("application/json")
-    if out:find("SUCCESS") then
+    if is_success then
         luci.http.write_json({ status = "success" })
     else
-        luci.http.write_json({ status = "error", message = out })
+        luci.http.write_json({ status = "error", message = out:gsub("[\r\n]+", " ") })
     end
 end
 
