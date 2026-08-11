@@ -27,7 +27,6 @@ header_ui.rawhtml = true
 header_ui.cfgvalue = function()
     return [=[
     <style>
-    /* Styling Standar Passwall - Transparan & Bersih */
     .cbi-section-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: transparent; border-radius: 4px; overflow: hidden; }
     .cbi-section-table th, .cbi-section-table td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(128, 128, 128, 0.2); color: inherit; }
     .cbi-section-table th { background: rgba(128, 128, 128, 0.1); color: inherit; font-size: 13px; font-weight: bold; }
@@ -35,7 +34,6 @@ header_ui.cfgvalue = function()
 
     .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 0px; color: inherit; }
 
-    /* GRID DIUBAH JADI 4 KOLOM */
     .pw-panel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 15px; background: transparent; padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); width: 100%; box-sizing: border-box; }
     @media screen and (max-width: 768px) { .pw-panel { grid-template-columns: repeat(2, 1fr); } }
     @media screen and (max-width: 480px) { .pw-panel { grid-template-columns: 1fr; } }
@@ -53,70 +51,29 @@ header_ui.cfgvalue = function()
     .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 0px; flex-wrap: wrap; padding-bottom: 0px; gap: 15px; }
     
     /* ===== TAB CONTAINER ===== */
-    .cbi-tabmenu {
-        display: flex;
-        color: inherit !important;
-        gap: 3px;
-    }
-
-    /* ===== TAB ===== */
-    .cbi-tabmenu > li {
-        color: inherit !important;
-        margin: 0;
-        padding: 0;
-    }
-
-    /* ===== TAB LINK ===== */
+    .cbi-tabmenu { display: flex; color: inherit !important; gap: 3px; }
+    .cbi-tabmenu > li { color: inherit !important; margin: 0; padding: 0; }
     .cbi-tabmenu > li > a {
-        display: block;
-        padding: 8px 16px;
-        line-height: 18px;
-        color: inherit !important;
-        text-decoration: none;
-        background: rgba(128,128,128,.06);
-        border: 1px solid rgba(128,128,128,.25);
-        border-bottom-color: rgba(128,128,128,.25);
-        border-radius: 4px 4px 0 0;
-        box-shadow: inset 0 1px rgba(255,255,255,.08);
-        transition: all .2s ease;
+        display: block; padding: 8px 16px; line-height: 18px; color: inherit !important; text-decoration: none;
+        background: rgba(128,128,128,.06); border: 1px solid rgba(128,128,128,.25); border-bottom-color: rgba(128,128,128,.25);
+        border-radius: 4px 4px 0 0; box-shadow: inset 0 1px rgba(255,255,255,.08); transition: all .2s ease;
     }
-
-    /* ===== HOVER ===== */
-    .cbi-tabmenu > li:hover > a {
-        background: rgba(128,128,128,.12);
-    }
-
-    /* ===== ACTIVE ===== */
+    .cbi-tabmenu > li:hover > a { background: rgba(128,128,128,.12); }
     .cbi-tabmenu > li.active > a {
-        color: #00AEFF !important;
-        background: transparent;
-        border-color: rgba(128,128,128,.25);
-        border-top:2px solid #00AEFF;
-        padding-top:7px;
-        margin-bottom: -1px;
-        box-shadow: 0 -1px 3px rgba(0,0,0,.05);
-        font-weight: 600;
+        color: #00AEFF !important; background: transparent; border-color: rgba(128,128,128,.25); border-top:2px solid #00AEFF;
+        padding-top:7px; margin-bottom: -1px; box-shadow: 0 -1px 3px rgba(0,0,0,.05); font-weight: 600;
     } 
    
     .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; }
     .profile-text .p-name { font-weight: bold; color: inherit; margin-right: 5px; opacity: 1; }
     .profile-text .p-status { font-weight: bold; margin-left: 3px; }
 
-    /* STYLING WIDGET IP & ANIMASI */
     #ip-widget-placeholder { display: flex; align-items: center; justify-content: center; margin-bottom: 15px; width: 100%; }
     
     .status-bar { 
-        background: rgba(128, 128, 128, 0.05); 
-        border: 1px solid rgba(128, 128, 128, 0.2); 
-        border-radius: 4px;             
-        padding: 10px 15px; 
-        color: inherit;
-        display: flex; 
-        justify-content: center; 
-        align-items: center;
-        white-space: nowrap;
-        width: 100%;
-        box-sizing: border-box;
+        background: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 4px;
+        padding: 10px 15px; color: inherit; display: flex; justify-content: center; align-items: center;
+        white-space: nowrap; width: 100%; box-sizing: border-box;
     }
 
     .inner { display: flex; align-items: center; gap: 12px; }
@@ -128,36 +85,50 @@ header_ui.cfgvalue = function()
 
     .text-offline { color: #ff4c4c !important; }
     .text-online { color: #06BA06 !important; }
-    
-    /* Warna Kustom Country & ISP */
     .text-country { color: inherit !important; }
     .text-isp-name { color: #C7AF0C !important; }
 
     @keyframes spin-globe { 100% { transform: rotate(360deg); } }
-    @keyframes wave-flag { 
-        0%, 100% { transform: skewY(-3deg) scale(1); }
-        50% { transform: skewY(3deg) scale(1.05); }
-    }
+    @keyframes wave-flag { 0%, 100% { transform: skewY(-3deg) scale(1); } 50% { transform: skewY(3deg) scale(1.05); } }
 
     .spin-anim { animation: spin-globe 1.5s linear infinite; height: 20px !important; width: 20px !important; }
     .wave-anim { animation: wave-flag 2.5s ease-in-out infinite; transform-origin: bottom left; }
     
-    /* KOTAK LOG */
-    #log_box,
-
     #log_box {
-        background: transparent !important;
-        padding: 10px;
-        font-family: monospace;
-        font-size: 12px;
-        white-space: pre-wrap;
-        overflow-y: auto;
-        height: 450px;
-        border-radius: 4px;
-        border: 1px solid rgba(128,128,128,.4);
+        background: transparent !important; padding: 10px; font-family: monospace; font-size: 12px;
+        white-space: pre-wrap; overflow-y: auto; height: 450px; border-radius: 4px; border: 1px solid rgba(128,128,128,.4);
     }
 
-    /* FIX HIDE FIELDS MANAGEMENT */
+    /* UPDATE PANEL STYLING */
+    .update-card {
+        background: rgba(128, 128, 128, 0.05);
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 6px;
+        padding: 20px;
+        margin-top: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        max-width: 650px;
+    }
+    .update-row { display: flex; align-items: center; font-size: 14px; }
+    .update-label { width: 180px; font-weight: bold; opacity: 0.85; }
+    .update-value { font-weight: bold; }
+    .btn-update {
+        padding: 7px 18px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 13px;
+        transition: 0.2s;
+    }
+    .btn-check { background: #00AEFF; color: #fff; }
+    .btn-check:hover { background: #008ecc; }
+    .btn-apply { background: #28a745; color: #fff; }
+    .btn-apply:hover { background: #218838; }
+    .btn-disabled { background: rgba(128,128,128,0.3) !important; color: #999 !important; cursor: not-allowed !important; }
+
     .hide-main-fields #cbi-passwall-ssh-main-enabled,
     .hide-main-fields #cbi-passwall-ssh-main-selected_profile { display: none !important; }
 
@@ -165,27 +136,14 @@ header_ui.cfgvalue = function()
     .hide-dns-fields #cbi-passwall-ssh-main-dns_ip,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_url { display: none !important; }
 
-    /* --- FIX JARAK ANTARA TAB DAN KONTEN BAWAH --- */
-    .cbi-map {
-        padding-top: 0 !important;
-    }
-    .cbi-section, .cbi-map-section {
-       margin-top: -8px !important; /* Gunakan minus untuk menarik konten ke atas */
-       padding-top: 0 !important;
-    }
-    fieldset.cbi-section legend {
-       margin-bottom: 0 !important;
-       padding-bottom: 0 !important;
-    }
-
-    .cbi-tabmenu {
-       border-bottom: none !important;
-    }
-
+    .cbi-map { padding-top: 0 !important; }
+    .cbi-section, .cbi-map-section { margin-top: -8px !important; padding-top: 0 !important; }
+    fieldset.cbi-section legend { margin-bottom: 0 !important; padding-bottom: 0 !important; }
+    .cbi-tabmenu { border-bottom: none !important; }
     </style>
 
     <div class="full-width-container">
-    <!-- Status Panel -->
+        <!-- Status Panel -->
         <div class="pw-panel">
             <div class="pw-box">
                 <div class="pw-icon">
@@ -232,8 +190,6 @@ header_ui.cfgvalue = function()
 
         <!-- Widget Stats -->
         <div id="stats-widget-container" class="status-bar" style="justify-content: space-between !important; margin-bottom: 25px; display: flex; width: 100%;">
-            
-            <!-- 1. KIRI: Connection Time -->
             <div style="display: flex; flex-direction: column; text-align: left; gap: 3px; flex: 1;">
                 <div style="font-size: 13px; font-weight: bold;">
                     <span style="opacity: 1;">Connection Time:</span>
@@ -245,13 +201,11 @@ header_ui.cfgvalue = function()
                 </div>
             </div>
 
-            <!-- 2. TENGAH: Profile Status -->
             <div class="profile-text" style="margin-left: 0; justify-content: center; flex: 1; display: flex; align-items: center;">
                 <span class="p-name">]=] .. active_profile .. [=[</span> :
                 <span class="p-status" id="profile-status" style="color:#888;">Checking...</span>
             </div>
 
-            <!-- 3. KANAN: RX TX -->
             <div style="display: flex; flex-direction: column; text-align: right; gap: 3px; flex: 1;">
                 <div style="display: flex; justify-content: flex-end; gap: 15px; font-size: 13px; font-weight: bold;">
                     <div><span style="color: #4da6ff;">↓ RX:</span> <span id="rx-val">0 B</span></div>
@@ -262,7 +216,6 @@ header_ui.cfgvalue = function()
                     <div>Last TX: <span id="last-tx-val">0 B</span></div>
                 </div>
             </div>
-            
         </div>
 
         <!-- TOOLBAR TABS -->
@@ -271,8 +224,32 @@ header_ui.cfgvalue = function()
                 <li id="tab_main" class="active"><a href="javascript:void(0)" onclick="switchTab('main')">Main</a></li>
                 <li id="tab_dns"><a href="javascript:void(0)" onclick="switchTab('dns')">DNS</a></li>
                 <li id="tab_config"><a href="javascript:void(0)" onclick="switchTab('config')">Profile</a></li>
+                <li id="tab_update"><a href="javascript:void(0)" onclick="switchTab('update')">App Update</a></li>
                 <li id="tab_log"><a href="javascript:void(0)" onclick="switchTab('log')">Log</a></li>
             </ul>
+        </div>
+
+        <!-- App Update Container -->
+        <div id="update-container" style="display: none;">
+            <div class="update-card">
+                <div class="update-row">
+                    <div class="update-label">My Architecture :</div>
+                    <div class="update-value" id="upd-arch">Detecting...</div>
+                </div>
+                <div class="update-row">
+                    <div class="update-label">Passwall-SSH Version :</div>
+                    <div class="update-value" id="upd-cur-ver">Detecting...</div>
+                </div>
+                <div style="margin-top: 5px;">
+                    <button type="button" id="btn-check-update" class="btn-update btn-check" onclick="checkAppUpdate()">Check Update</button>
+                </div>
+                
+                <div id="update-check-result" style="display: none; font-size: 14px; font-weight: bold; margin-top: 5px;"></div>
+                
+                <div id="update-action-box" style="display: none;">
+                    <button type="button" id="btn-do-update" class="btn-update btn-apply" onclick="executeAppUpdate()">Click To Update</button>
+                </div>
+            </div>
         </div>
 
         <!-- Log Container -->
@@ -285,14 +262,16 @@ header_ui.cfgvalue = function()
     </div>
 
     <script type="text/javascript">
-
         const loadingGlobeURI = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQwIiBzdHJva2U9IiM4ODgiIHN0cm9rZS13aWR0aD0iOCIgZmlsbD0ibm9uZSIgb3BhY2l0eT0iMC4zIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iNDAiIHN0cm9rZT0iIzAwQUVGRiIgc3Ryb2tlLXdpZHRoPSI4IiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSI3MCAyMDAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==";
-        
         const CHECK_IP_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_ip") .. [=[';
+        const GET_APP_INFO_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "get_app_info") .. [=[';
+        const CHECK_APP_UPDATE_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_app_update") .. [=[';
+        const DO_APP_UPDATE_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "do_app_update") .. [=[';
         
         window.isFetchingIP = false;
         var startTimeEpoch = 0;
         var timerInterval = null;
+        var latestDownloadUrl = "";
 
         function formatBytes(bytes) {
             bytes = parseInt(bytes);
@@ -309,11 +288,9 @@ header_ui.cfgvalue = function()
             var hrs = Math.floor(sec / 3600);
             var mins = Math.floor((sec % 3600) / 60);
             var secs = sec % 60;
-            
             var hStr = hrs < 10 ? "0" + hrs : hrs;
             var mStr = mins < 10 ? "0" + mins : mins;
             var sStr = secs < 10 ? "0" + secs : secs;
-            
             return hStr + ":" + mStr + ":" + sStr;
         }
 
@@ -342,41 +319,28 @@ header_ui.cfgvalue = function()
             
             if (!flagImg || !ipText || !infoText) return;
 
-            // Jika statusnya Offline atau sedang Loading
             if (data.ip === "Offline" || data.ip === "Loading..." || !data.ip) {
                 flagImg.src = loadingGlobeURI;
                 flagImg.className = "spin-anim";
-                
                 ipText.innerHTML = data.ip || "Offline";
                 ipText.className = "text-offline";
-                
-                // Sembunyikan garis pemisah "|" dan info negara/ISP
                 if (sepText) sepText.style.display = "none";
                 infoText.style.display = "none";
-                
                 if(pStatus) {
                     pStatus.innerHTML = (data.ip === "Loading...") ? "Checking..." : "Disconnected";
                     pStatus.style.color = (data.ip === "Loading...") ? "#888" : "#ff4c4c";
                 }
             } else {
-                // Jika statusnya Online
                 let countryCode = data.flag ? data.flag.toLowerCase() : "un"; 
-                
                 flagImg.src = 'https://flagcdn.com/w40/' + countryCode + '.png';
-                
-                setTimeout(function() { 
-                    flagImg.className = "wave-anim"; 
-                }, 50);
+                setTimeout(function() { flagImg.className = "wave-anim"; }, 50);
 
                 ipText.innerHTML = data.ip;
                 ipText.className = "text-online";
-                
-                // Tampilkan kembali garis pemisah "|" dan info negara/ISP
                 if (sepText) sepText.style.display = "block";
                 infoText.style.display = "block";
                 infoText.innerHTML = '<span class="text-country">' + (data.country || "Unknown") + '</span> <span class="separator">|</span> <span class="text-isp-name">' + (data.isp || "Unknown") + '</span>';
                 infoText.className = ""; 
-                
                 if(pStatus) {
                     pStatus.innerHTML = "Connected";
                     pStatus.style.color = "#06BA06";
@@ -387,10 +351,7 @@ header_ui.cfgvalue = function()
         window.forceCheckIP = function() {
             if (window.isFetchingIP) return; 
             window.isFetchingIP = true;
-            
-            // Ubah menjadi "Loading..." saat proses ngecek IP (sebelumnya "Offline")
             write_status({ ip: "Loading..." }); 
-
             fetch(CHECK_IP_URL)
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
@@ -398,7 +359,6 @@ header_ui.cfgvalue = function()
                     window.isFetchingIP = false;
                 })
                 .catch(function(e) {
-                    console.log("IP Check Error", e);
                     write_status({ ip: "Offline" });
                     window.isFetchingIP = false; 
                 });
@@ -414,9 +374,20 @@ header_ui.cfgvalue = function()
             return el;
         }
 
+        function loadAppInfo() {
+            fetch(GET_APP_INFO_URL)
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    var archEl = document.getElementById('upd-arch');
+                    var verEl = document.getElementById('upd-cur-ver');
+                    if (archEl) archEl.innerText = data.arch || "Unknown";
+                    if (verEl) verEl.innerText = data.version || "Unknown";
+                });
+        }
+
         function switchTab(tabName) {
             sessionStorage.setItem('passwall_active_tab', tabName);
-            ['main', 'dns', 'config', 'log'].forEach(function(t) {
+            ['main', 'dns', 'config', 'update', 'log'].forEach(function(t) {
                 var tab = document.getElementById('tab_' + t);
                 if (tab) tab.classList.remove('active');
             });
@@ -426,10 +397,10 @@ header_ui.cfgvalue = function()
             var secMain = findSection('marker-main');
             var secConfig = findSection('marker-config');
             var secLog = document.getElementById('log-container');
+            var secUpdate = document.getElementById('update-container');
 
             if (secMain) {
                 secMain.style.display = (tabName === 'main' || tabName === 'dns') ? 'block' : 'none';
-                
                 if (tabName === 'main') {
                     secMain.classList.remove('hide-main-fields');
                     secMain.classList.add('hide-dns-fields');
@@ -440,13 +411,106 @@ header_ui.cfgvalue = function()
             }
 
             if (secConfig) secConfig.style.display = (tabName === 'config') ? 'block' : 'none';
-            
-            // ---LOG INSTAN ---
             if (secLog) {
                 secLog.style.display = (tabName === 'log') ? 'block' : 'none';
                 if (tabName === 'log') updateLog(); 
             }
+            if (secUpdate) {
+                secUpdate.style.display = (tabName === 'update') ? 'block' : 'none';
+                if (tabName === 'update') loadAppInfo();
+            }
         }
+
+        window.checkAppUpdate = function() {
+            var btn = document.getElementById('btn-check-update');
+            var resBox = document.getElementById('update-check-result');
+            var actBox = document.getElementById('update-action-box');
+            
+            btn.classList.add('btn-disabled');
+            btn.disabled = true;
+            btn.innerText = "Checking...";
+            resBox.style.display = "none";
+            actBox.style.display = "none";
+
+            fetch(CHECK_APP_UPDATE_URL)
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    btn.classList.remove('btn-disabled');
+                    btn.disabled = false;
+                    btn.innerText = "Check Update";
+                    resBox.style.display = "block";
+
+                    if (!res.success) {
+                        resBox.innerHTML = '<span style="color:#ff4c4c;">Failed to check update.</span>';
+                        return;
+                    }
+
+                    if (res.has_update) {
+                        latestDownloadUrl = res.download_url;
+                        resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + '</span>';
+                        actBox.style.display = "block";
+                    } else {
+                        resBox.innerHTML = '<span style="color:#06BA06;">Latest Version ' + res.latest_version + ', your app up to date.</span>';
+                        actBox.style.display = "none";
+                    }
+                })
+                .catch(function() {
+                    btn.classList.remove('btn-disabled');
+                    btn.disabled = false;
+                    btn.innerText = "Check Update";
+                    resBox.style.display = "block";
+                    resBox.innerHTML = '<span style="color:#ff4c4c;">Connection error during update check.</span>';
+                });
+        };
+
+        window.executeAppUpdate = function() {
+            var btn = document.getElementById('btn-do-update');
+            var chkBtn = document.getElementById('btn-check-update');
+            btn.classList.add('btn-disabled');
+            btn.disabled = true;
+            chkBtn.classList.add('btn-disabled');
+            chkBtn.disabled = true;
+
+            // Animasi transisi status
+            btn.innerText = "[Downloading]";
+            setTimeout(function() {
+                if (btn.innerText === "[Downloading]") btn.innerText = "[Unpacking]";
+            }, 3000);
+            setTimeout(function() {
+                if (btn.innerText === "[Unpacking]") btn.innerText = "[Moving]";
+            }, 6000);
+
+            var formData = new FormData();
+            formData.append("url", latestDownloadUrl);
+
+            fetch(DO_APP_UPDATE_URL, {
+                method: "POST",
+                body: formData
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.status === "success") {
+                    btn.innerText = "[Update Successfull]";
+                    btn.style.background = "#28a745";
+                    setTimeout(function() {
+                        location.reload();
+                    }, 2000);
+                } else {
+                    btn.innerText = "Update Failed!";
+                    btn.style.background = "#dc3545";
+                    alert("Update failed: " + (res.message || "Unknown error"));
+                    btn.classList.remove('btn-disabled');
+                    btn.disabled = false;
+                }
+            })
+            .catch(function(e) {
+                btn.innerText = "Error!";
+                btn.style.background = "#dc3545";
+                alert("Network error while updating");
+                btn.classList.remove('btn-disabled');
+                btn.disabled = false;
+            });
+        };
 
         function touchCheck(host, elId) {
             var el = document.getElementById(elId);
@@ -513,15 +577,9 @@ header_ui.cfgvalue = function()
                             if (connTimeEl) connTimeEl.innerText = "00:00:00";
                         }
 
-                        if (lastConnEl) {
-                            lastConnEl.innerText = formatSeconds(lastConnVal);
-                        }
-                        if (lastRxEl) {
-                            lastRxEl.innerText = formatBytes(lastRxVal);
-                        }
-                        if (lastTxEl) {
-                            lastTxEl.innerText = formatBytes(lastTxVal);
-                        }
+                        if (lastConnEl) lastConnEl.innerText = formatSeconds(lastConnVal);
+                        if (lastRxEl) lastRxEl.innerText = formatBytes(lastRxVal);
+                        if (lastTxEl) lastTxEl.innerText = formatBytes(lastTxVal);
 
                         var isRunning = (parts[0] === "1"); 
                         if (isRunning) {
@@ -568,7 +626,6 @@ header_ui.cfgvalue = function()
         window.clearLog = function() {
             var box = document.getElementById('log_box');
             if (box) box.innerHTML = "";
-            
             var xhr = new XMLHttpRequest();
             xhr.open('GET', ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "clear_log") .. [=[', true);
             xhr.onreadystatechange = function() {
@@ -619,7 +676,7 @@ dns_proto:value("DoQ", "Quic (DoQ)")
 dns_proto:value("DoH3", "HTTP3 (DoH3)")
 dns_proto.default = "UDP"
 
-dns_ip = s:option(Value, "dns_ip", "DNS Server :", "Pilih dari daftar atau KETIK LANGSUNG MANUAL")
+dns_ip = s:option(Value, "dns_ip", "DNS Server :", "Pilih dari daftar atau ketik manual")
 dns_ip:depends("dns_proto", "UDP")
 dns_ip:depends("dns_proto", "TCP")
 dns_ip:depends("dns_proto", "DoT")
@@ -629,7 +686,7 @@ dns_ip:value("8.8.8.8", "8.8.8.8 (Google)")
 dns_ip:value("9.9.9.9", "9.9.9.9 (Quad9)")
 dns_ip.default = "1.1.1.1"
 
-dns_url = s:option(Value, "dns_url", "DNS Server :", "Pilih dari daftar atau KETIK LANGSUNG MANUAL")
+dns_url = s:option(Value, "dns_url", "DNS Server :", "Pilih dari daftar atau ketik manual")
 dns_url:depends("dns_proto", "DoH")
 dns_url:depends("dns_proto", "DoH3")
 dns_url:value("cloudflare-dns.com/dns-query", "Cloudflare")
@@ -647,7 +704,6 @@ conf.anonymous = false
 
 conf.extedit = luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", "%s")
 
--- ====== HOOK AUTO-REDIRECT ======
 function conf.create(self, section)
     local created = TypedSection.create(self, section)
     if created then
@@ -659,7 +715,6 @@ function conf.create(self, section)
     return created
 end
 
--- ====== DETEKSI VERSI OS UNTUK FIX KOLOM GANDA ======
 local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
 local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
 
