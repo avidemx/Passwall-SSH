@@ -207,7 +207,7 @@ function action_do_app_update()
         # 4. Install Sesuai Package Manager
         INSTALL_STATUS=0
         if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
-            apk add --allow-untrusted --force-overwrite --upgrade "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            apk add --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
             INSTALL_STATUS=$?
         else
             opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
