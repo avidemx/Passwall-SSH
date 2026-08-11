@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=passwall-ssh
-PKG_VERSION:=3.4.0
+PKG_VERSION:=4.2.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=avidemx
@@ -21,7 +21,6 @@ define Package/passwall-ssh/description
   SSH Tunnel Client with Stunnel and BadVPN Tun2Socks for OpenWrt.
 endef
 
-# Karena ini cuma script (tidak ada kode C/C++ yang perlu di-compile), Build/Compile dikosongkan
 define Build/Compile
 endef
 
@@ -32,24 +31,31 @@ define Package/passwall-ssh/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/passwall-ssh
 	$(INSTALL_DIR) $(1)/usr/share/passwall-ssh
 	
-	# Mengopi semua yang ada di folder 'files' ke dalam paket root
+	# Salin semua file dari folder 'files'
 	$(CP) ./files/* $(1)/
 	
-	# Memberi izin eksekusi
-	chmod +x $(1)/etc/init.d/passwall-ssh
-	chmod +x $(1)/usr/share/passwall-ssh/*.sh
+	# Berikan izin eksekusi
+	chmod 0755 $(1)/etc/init.d/passwall-ssh 2>/dev/null || true
+	chmod 0755 $(1)/usr/share/passwall-ssh/*.sh 2>/dev/null || true
 endef
 
 define Package/passwall-ssh/postinst
 #!/bin/sh
 [ -z "$${IPKG_INSTROOT}" ] || exit 0
-for svc in stunnel dnsproxy; do
-    if [ -x "/etc/init.d/$$svc" ]; then
-        /etc/init.d/$$svc stop >/dev/null 2>&1
-        /etc/init.d/$$svc disable >/dev/null 2>&1
-        killall "$$svc" >/dev/null 2>&1 || true
-    fi
+
+if [ -x "/etc/init.d/passwall-ssh" ]; then
+	/etc/init.d/passwall-ssh stop >/dev/null 2>&1
+	/etc/init.d/passwall-ssh disable >/dev/null 2>&1
+fi
+
+for svc in passwall-ssh stunnel dnsproxy badvpn-tun2socks; do
+	if [ -x "/etc/init.d/$$svc" ]; then
+		/etc/init.d/$$svc stop >/dev/null 2>&1
+		/etc/init.d/$$svc disable >/dev/null 2>&1
+	fi
+	killall -9 "$$svc" >/dev/null 2>&1 || true
 done
+
 exit 0
 endef
 
