@@ -233,7 +233,7 @@ header_ui.cfgvalue = function()
         <div id="update-container" style="display: none;">
             <div class="update-card">
                 <div class="update-row">
-                    <div class="update-label">My Architecture :</div>
+                    <div class="update-label">Architecture :</div>
                     <div class="update-value" id="upd-arch">Detecting...</div>
                 </div>
                 <div class="update-row">
