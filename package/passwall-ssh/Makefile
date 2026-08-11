@@ -14,11 +14,14 @@ define Package/passwall-ssh
   CATEGORY:=Network
   TITLE:=SSH Tunnel Client with Stunnel and BadVPN Tun2Socks
   DEPENDS:=+sshpass +curl +resolveip +openssh-client +stunnel +kmod-tun +dnsproxy +ip-full +lua +luasocket +luci-compat
-  PKGARCH:=all
 endef
 
 define Package/passwall-ssh/description
   SSH Tunnel Client with Stunnel and BadVPN Tun2Socks for OpenWrt.
+endef
+
+define Package/passwall-ssh/conffiles
+/etc/config/passwall-ssh
 endef
 
 define Build/Compile
@@ -27,6 +30,7 @@ endef
 define Package/passwall-ssh/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/passwall-ssh
 	$(INSTALL_DIR) $(1)/usr/share/passwall-ssh
@@ -36,24 +40,29 @@ define Package/passwall-ssh/install
 	
 	# Berikan izin eksekusi
 	chmod 0755 $(1)/etc/init.d/passwall-ssh 2>/dev/null || true
+	chmod 0755 $(1)/usr/bin/* 2>/dev/null || true
 	chmod 0755 $(1)/usr/share/passwall-ssh/*.sh 2>/dev/null || true
+endef
+
+define Package/passwall-ssh/prerm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+
+if [ -x "/etc/init.d/passwall-ssh" ]; then
+	/etc/init.d/passwall-ssh stop >/dev/null 2>&1 || true
+fi
+
+exit 0
 endef
 
 define Package/passwall-ssh/postinst
 #!/bin/sh
-[ -z "$${IPKG_INSTROOT}" ] || exit 0
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
 
-if [ -x "/etc/init.d/passwall-ssh" ]; then
-	/etc/init.d/passwall-ssh stop >/dev/null 2>&1
-	/etc/init.d/passwall-ssh disable >/dev/null 2>&1
-fi
-
-for svc in passwall-ssh stunnel dnsproxy badvpn-tun2socks; do
-	if [ -x "/etc/init.d/$$svc" ]; then
-		/etc/init.d/$$svc stop >/dev/null 2>&1
-		/etc/init.d/$$svc disable >/dev/null 2>&1
-	fi
-	killall -9 "$$svc" >/dev/null 2>&1 || true
+for svc in passwall-ssh stunnel dnsproxy; do
+	[ -x "/etc/init.d/$$svc" ] || continue
+	/etc/init.d/$$svc stop >/dev/null 2>&1 || true
+	/etc/init.d/$$svc disable >/dev/null 2>&1 || true
 done
 
 exit 0

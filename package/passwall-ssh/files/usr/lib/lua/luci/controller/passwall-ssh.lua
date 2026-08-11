@@ -125,7 +125,7 @@ function action_check_app_update()
         message = ""
     }
     
-    -- 2. Ekstrak nama tag dari URL (contoh: .../releases/tag/v4.2.0 atau .../releases/tag/v4.2)
+    -- 2. Ekstrak nama tag dari URL (contoh: .../releases/tag/v4.2.0)
     local raw_tag = loc_header:match("/releases/tag/([^/?#]+)")
     
     -- Fallback jika redirect HEAD kosong: gunakan GitHub API cepat
@@ -178,7 +178,6 @@ end
 
 function action_do_app_update()
     local sys = require "luci.sys"
-    local uci = require "luci.model.uci".cursor()
     local dl_url = luci.http.formvalue("url") or ""
     
     local sys_info = get_system_info()
@@ -189,7 +188,7 @@ function action_do_app_update()
         EXT="%s"
         PKG_FILE="/tmp/passwall_update_pkg.${EXT}"
         
-        # 1. Download Package dengan ekstensi yang benar
+        # 1. Download Package (saat internet/tunnel masih menyala)
         rm -f /tmp/passwall_update_pkg*
         curl -skL -m 60 "$URL" -o "$PKG_FILE"
         if [ ! -s "$PKG_FILE" ]; then
@@ -197,17 +196,19 @@ function action_do_app_update()
             exit 1
         fi
         
-        # 2. Backup Config Settingan
+        # 2. Backup Config Settingan & Cek Status Aktif
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
         
         # 3. Stop Service Sebelum Update
-        /etc/init.d/passwall-ssh stop >/dev/null 2>&1
+        if [ -x "/etc/init.d/passwall-ssh" ]; then
+            /etc/init.d/passwall-ssh stop >/dev/null 2>&1
+        fi
         
-        # 4. Install Sesuai Package Manager
+        # 4. Install Sesuai Package Manager (MODE OFFLINE PENUH)
         INSTALL_STATUS=0
         if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
-            apk add --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            apk add --no-network --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
             INSTALL_STATUS=$?
         else
             opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
@@ -227,12 +228,13 @@ function action_do_app_update()
             rm -f /tmp/passwall-ssh.bak
         fi
         
-        # 6. Bersihkan temporary file & Cache LuCI
+        # 6. Bersihkan file temporary & Cache LuCI
         rm -f "$PKG_FILE" /tmp/passwall_install.log
-        rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+        rm -rf /tmp/luci-indexcache /tmp/luci-modulecache /tmp/luci-indexcache.*
         
-        # 7. Start kembali jika sebelumnya aktif
-        if [ "$ENABLED" = "1" ]; then
+        # 7. Enable & Start kembali jika sebelumnya aktif
+        if [ "$ENABLED" = "1" ] && [ -x "/etc/init.d/passwall-ssh" ]; then
+            /etc/init.d/passwall-ssh enable >/dev/null 2>&1
             /etc/init.d/passwall-ssh start >/dev/null 2>&1 &
         fi
         
