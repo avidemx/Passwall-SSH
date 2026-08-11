@@ -8,9 +8,13 @@ function index()
     entry({"admin", "services", "passwall-ssh", "check_services"}, call("action_check_services"))
     entry({"admin", "services", "passwall-ssh", "get_log"}, call("action_get_log"))
     entry({"admin", "services", "passwall-ssh", "clear_log"}, call("action_clear_log"))
+    
+    -- API Route untuk App Update
+    entry({"admin", "services", "passwall-ssh", "get_app_info"}, call("action_get_app_info")).leaf = true
+    entry({"admin", "services", "passwall-ssh", "check_app_update"}, call("action_check_app_update")).leaf = true
+    entry({"admin", "services", "passwall-ssh", "do_app_update"}, call("action_do_app_update")).leaf = true
 end
 
--- Fungsi bantuan (Helper) untuk I/O file yang ringan
 local function read_file(path)
     local f = io.open(path, "r")
     if f then
@@ -29,35 +33,216 @@ local function write_file(path, data)
     end
 end
 
+-- ==========================================
+-- HELPER: DETEKSI OS & ARSITEKTUR LENGKAP
+-- ==========================================
+local function get_system_info()
+    local sys = require "luci.sys"
+    local os_rel = sys.exec("cat /etc/os-release 2>/dev/null") or ""
+    
+    -- 1. Deteksi Versi OS (24, 25, dst)
+    local os_ver = os_rel:match('VERSION_ID="([%d]+)') or ""
+    if os_ver == "" then
+        if sys.call("command -v apk >/dev/null 2>&1") == 0 then
+            os_ver = "25"
+        else
+            os_ver = "24"
+        end
+    end
+    
+    local is_apk = (os_ver == "25") or (sys.call("command -v apk >/dev/null 2>&1") == 0)
+    local pkg_ext = is_apk and "apk" or "ipk"
+    
+    -- 2. Deteksi Arsitektur Lengkap (Sub-target)
+    local arch = ""
+    if not is_apk then
+        -- OpenWrt 24: Ambil arsitektur paling spesifik dari OPKG (skip all / noarch)
+        arch = sys.exec("opkg print-architecture 2>/dev/null | grep -v 'all 1' | grep -v 'noarch 1' | sort -n -k 2 -r | head -n 1 | awk '{print $2}'"):gsub("%s+", "")
+    else
+        -- OpenWrt 25: Ambil dari apk --print-arch atau board info
+        arch = sys.exec("apk --print-arch 2>/dev/null"):gsub("%s+", "")
+    end
+    
+    if arch == "" then
+        arch = sys.exec("uname -m 2>/dev/null"):gsub("%s+", "")
+    end
+
+    -- Normalisasi beberapa nama arch jika diperlukan
+    if arch == "x86-64" then arch = "x86_64" end
+
+    -- 3. Deteksi Versi Aplikasi Terinstal Saat Ini
+    local cur_ver = ""
+    if is_apk then
+        local raw = sys.exec("apk info passwall-ssh 2>/dev/null | head -n 1"):gsub("%s+", " ")
+        cur_ver = raw:match("passwall%-ssh%-([%d%.%-_r]+)") or ""
+    else
+        cur_ver = sys.exec("opkg list-installed passwall-ssh 2>/dev/null | awk '{print $3}'"):gsub("%s+", "")
+    end
+    if cur_ver == "" then
+        cur_ver = read_file("/usr/share/passwall-ssh/version")
+    end
+    if cur_ver == "" then cur_ver = "Unknown" end
+
+    return {
+        os_ver = os_ver,
+        pkg_ext = pkg_ext,
+        arch = arch,
+        cur_ver = cur_ver
+    }
+end
+
+function action_get_app_info()
+    local info = get_system_info()
+    local resp = {
+        arch = info.arch,
+        version = info.cur_ver,
+        os_ver = info.os_ver
+    }
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(resp)
+end
+
+function action_check_app_update()
+    local sys = require "luci.sys"
+    local json = require "luci.jsonc"
+    
+    local sys_info = get_system_info()
+    
+    -- Ambil header Location tanpa menggunakan GitHub API
+    local cmd = "curl -sI -m 8 'https://github.com/avidemx/Passwall-SSH/releases/latest' | grep -i '^location:' | awk '{print $2}'"
+    local loc_header = sys.exec(cmd):gsub("[\r\n%s]+", "")
+    
+    local result = {
+        success = false,
+        current_version = sys_info.cur_ver,
+        latest_version = "",
+        has_update = false,
+        download_url = "",
+        asset_name = "",
+        message = ""
+    }
+    
+    -- Ekstrak tag rilis dari URL location (contoh: .../releases/tag/v4.1.0 atau .../releases/tag/4.1.0)
+    local raw_tag = loc_header:match("/releases/tag/(.+)$")
+    
+    if raw_tag and raw_tag ~= "" then
+        local latest_tag = raw_tag:gsub("^v", "")
+        result.success = true
+        result.latest_version = latest_tag
+        
+        -- Susun nama file target sesuai format penamaan rilis
+        local target_file = string.format("passwall-ssh_%s_%s_%s.%s", 
+            sys_info.os_ver, 
+            latest_tag, 
+            sys_info.arch, 
+            sys_info.pkg_ext
+        )
+        
+        -- Susun URL download langsung ke aset rilis
+        local dl_url = string.format("https://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
+            raw_tag, 
+            target_file
+        )
+        
+        result.download_url = dl_url
+        result.asset_name = target_file
+        
+        -- Komparasi versi saat ini dengan versi rilis terbaru
+        local clean_cur = tostring(sys_info.cur_ver):gsub("%-r%d+", ""):gsub("^v", "")
+        local clean_latest = tostring(latest_tag):gsub("%-r%d+", ""):gsub("^v", "")
+        
+        if clean_latest ~= clean_cur and sys_info.cur_ver ~= latest_tag then
+            result.has_update = true
+        end
+    else
+        result.message = "Gagal mengambil info rilis dari GitHub."
+    end
+    
+    luci.http.prepare_content("application/json")
+    luci.http.write_json(result)
+end
+
+function action_do_app_update()
+    local sys = require "luci.sys"
+    local uci = require "luci.model.uci".cursor()
+    local dl_url = luci.http.formvalue("url") or ""
+    
+    local sh_script = string.format([[
+        URL="%s"
+        PKG_FILE="/tmp/passwall_update_pkg"
+        
+        # 1. Download Package
+        rm -f /tmp/passwall_update_pkg*
+        curl -skL -m 60 "$URL" -o "$PKG_FILE"
+        if [ ! -s "$PKG_FILE" ]; then
+            echo "DOWNLOAD_FAILED"
+            exit 1
+        fi
+        
+        # 2. Backup Config Settingan
+        cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
+        
+        # 3. Cek Status Tunnel & Stop Service
+        ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
+        /etc/init.d/passwall-ssh stop >/dev/null 2>&1
+        
+        # 4. Install Sesuai Package Manager
+        if echo "$URL" | grep -q '\.apk$' || command -v apk >/dev/null 2>&1; then
+            apk add --allow-untrusted --force-overwrite --upgrade "$PKG_FILE" >/dev/null 2>&1
+        elif echo "$URL" | grep -q '\.ipk$' || command -v opkg >/dev/null 2>&1; then
+            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/dev/null 2>&1
+        else
+            tar -xzf "$PKG_FILE" -C / >/dev/null 2>&1
+        fi
+        
+        # 5. Restore Config
+        if [ -f /tmp/passwall-ssh.bak ]; then
+            cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
+            rm -f /tmp/passwall-ssh.bak
+        fi
+        
+        # 6. Bersihkan temporary file
+        rm -f "$PKG_FILE"
+        
+        # 7. Start kembali jika enable == 1
+        if [ "$ENABLED" = "1" ]; then
+            /etc/init.d/passwall-ssh start >/dev/null 2>&1 &
+        fi
+        
+        echo "SUCCESS"
+    ]], dl_url)
+    
+    local out = sys.exec(sh_script):gsub("%s+", "")
+    
+    luci.http.prepare_content("application/json")
+    if out:find("SUCCESS") then
+        luci.http.write_json({ status = "success" })
+    else
+        luci.http.write_json({ status = "error", message = out })
+    end
+end
+
 function action_check_services()
     local sys = require "luci.sys"
     local uci = require "luci.model.uci".cursor()
-    
     local active_profile = uci:get("passwall-ssh", "main", "selected_profile") or "No Profile"
 
-    -- Folder sementara (RAM) untuk data "Current"
     sys.exec("mkdir -p /tmp/state/passwall-ssh")
-
     local core = sys.call("pidof badvpn-tun2socks >/dev/null 2>&1") == 0 and "1" or "0"
-
     local iface = "tun0"
     local rx = "0"
     local tx = "0"
     local start_time = "0"
 
     if core == "1" then
-        -- 1. Ambil RX & TX saat ini
         local cur_rx = read_file("/sys/class/net/" .. iface .. "/statistics/rx_bytes")
         local cur_tx = read_file("/sys/class/net/" .. iface .. "/statistics/tx_bytes")
-        
         if cur_rx ~= "" then rx = cur_rx end
         if cur_tx ~= "" then tx = cur_tx end
         
-        -- SIMPAN CURRENT DI RAM (/tmp) -> Aman dari flash wear
         write_file("/tmp/state/passwall-ssh/current_rx", rx)
         write_file("/tmp/state/passwall-ssh/current_tx", tx)
 
-        -- 2. Ambil Start Time Epoch dari PID
         local pid = sys.exec("pidof badvpn-tun2socks | awk '{print $1}' 2>/dev/null"):gsub("%s+", "")
         if pid ~= "" then
             start_time = sys.exec("stat -c %Y /proc/" .. pid .. " 2>/dev/null"):gsub("%s+", "")
@@ -68,34 +253,27 @@ function action_check_services()
             if start_time == "" or not tonumber(start_time) then start_time = "0" end
         end
 
-        -- 3. Hitung durasi berjalannya koneksi
         if start_time ~= "0" and tonumber(start_time) then
             local current_duration = os.time() - tonumber(start_time)
             if current_duration < 0 then current_duration = 0 end
             write_file("/tmp/state/passwall-ssh/current_conn", tostring(current_duration))
         end
-     else
-        -- 4. Jika VPN mati, pindahkan file 'Current' menjadi 'Last' ke penyimpanan PERMANEN
+    else
         local check_rx = read_file("/tmp/state/passwall-ssh/current_rx")
         if check_rx ~= "" and check_rx ~= "0" then
-            
-            -- BACA SISA DATA
             local check_tx = read_file("/tmp/state/passwall-ssh/current_tx")
             local check_conn = read_file("/tmp/state/passwall-ssh/current_conn")
 
-            -- TULIS MANUAL KE FLASH (Karena os.rename gagal antar partisi)
             write_file("/usr/share/passwall-ssh/last_rx", check_rx)
             write_file("/usr/share/passwall-ssh/last_tx", check_tx)
             write_file("/usr/share/passwall-ssh/last_conn", check_conn)
 
-            -- HAPUS FILE DI TMP AGAR TIDAK TERUS MENULIS
             os.remove("/tmp/state/passwall-ssh/current_rx")
             os.remove("/tmp/state/passwall-ssh/current_tx")
             os.remove("/tmp/state/passwall-ssh/current_conn")
         end
     end
 
-    -- 5. Baca data history (Last RX, TX, dan Conn dari Flash storage)
     local last_rx = read_file("/usr/share/passwall-ssh/last_rx")
     local last_tx = read_file("/usr/share/passwall-ssh/last_tx")
     local last_conn = read_file("/usr/share/passwall-ssh/last_conn")
@@ -105,8 +283,6 @@ function action_check_services()
     if last_conn == "" then last_conn = "0" end
 
     luci.http.prepare_content("text/plain")
-    
-    -- Format output
     luci.http.write(core .. ",0,0," .. active_profile .. "," .. rx .. "," .. tx .. "," .. start_time .. "," .. last_conn .. "," .. last_rx .. "," .. last_tx)
 end
 
@@ -138,7 +314,7 @@ function action_get_log()
         luci.http.write(data)
     else
         luci.http.prepare_content("text/plain")
-        luci.http.write("Menunggu log...")
+        luci.http.write("Loading...")
     end
 end
 
@@ -162,9 +338,7 @@ end
 
 function action_clear_log()
     local sys = require "luci.sys"
-    -- Mengosongkan file log tanpa menghapus filenya
     sys.exec("echo '' > /tmp/etc/passwall-ssh.log")
-    
     luci.http.prepare_content("text/plain")
     luci.http.write("OK")
 end
