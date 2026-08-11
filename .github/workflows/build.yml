@@ -90,8 +90,10 @@ jobs:
     - name: Sync App Version to Repository Makefile
       run: |
         echo "Building Passwall-SSH with version: $APP_VERSION"
-        [ -f package/passwall-ssh/Makefile ] && sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
-        [ -f Makefile ] && sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" Makefile
+        if [ -f package/passwall-ssh/Makefile ]; then
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+          echo "Updated package/passwall-ssh/Makefile to $APP_VERSION"
+        fi
 
     - name: Download OpenWrt SDK
       run: |
