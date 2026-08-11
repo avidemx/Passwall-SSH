@@ -106,7 +106,13 @@ jobs:
       run: |
         cp -a package/badvpn sdk/package/
         cp -a package/passwall-ssh sdk/package/
-
+        
+    - name: Update Version in Makefile
+      run: |
+        PKG_VER=$(cat Version | tr -d '\r\n%s')
+        sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" Makefile
+        echo "Makefile PKG_VERSION updated to: $PKG_VER"
+    
     - name: Configure SDK & Set Version
       working-directory: sdk
       run: |
