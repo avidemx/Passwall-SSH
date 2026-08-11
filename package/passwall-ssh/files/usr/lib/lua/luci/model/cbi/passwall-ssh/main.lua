@@ -3,9 +3,7 @@ local sys = require "luci.sys"
 
 m = Map("passwall-ssh")
 
--- ==========================================
 -- HOOK TRIGGER SAVE & APPLY 
--- ==========================================
 m.on_after_commit = function(self)
     self.uci:commit("passwall-ssh")
     sys.call("/etc/init.d/passwall-ssh enable")
