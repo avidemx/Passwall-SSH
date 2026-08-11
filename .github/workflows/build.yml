@@ -17,8 +17,15 @@ jobs:
     - name: Read version from file
       id: read_version
       run: |
-        VERSION=$(cat VERSION | tr -d ' \r\n')
+        # Cari file VERSION atau Version tanpa mempermasalahkan huruf besar/kecil
+        VER_FILE=$(ls | grep -i "^version$" | head -n 1)
+        if [ -n "$VER_FILE" ]; then
+          VERSION=$(cat "$VER_FILE" | tr -d ' \r\n')
+        else
+          VERSION="4.2.0"
+        fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Target Release Version: $VERSION"
 
   build:
     needs: setup
@@ -80,9 +87,11 @@ jobs:
           build-essential clang flex bison gawk gettext git \
           libncurses-dev libssl-dev python3 rsync unzip wget zstd
 
-    - name: Set Version in Makefile
+    - name: Sync App Version to Repository Makefile
       run: |
-        sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+        echo "Building Passwall-SSH with version: $APP_VERSION"
+        [ -f package/passwall-ssh/Makefile ] && sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+        [ -f Makefile ] && sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" Makefile
 
     - name: Download OpenWrt SDK
       run: |
@@ -106,12 +115,6 @@ jobs:
       run: |
         cp -a package/badvpn sdk/package/
         cp -a package/passwall-ssh sdk/package/
-        
-    - name: Update Version in Makefile
-      run: |
-        PKG_VER=$(cat Version | tr -d '\r\n%s')
-        sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" Makefile
-        echo "Makefile PKG_VERSION updated to: $PKG_VER"
     
     - name: Configure SDK & Set Version
       working-directory: sdk
@@ -156,7 +159,6 @@ jobs:
     - name: Prepare Release Artifacts
       run: |
         mkdir -p release
-        # Cari file spesifik hasil build passwall-ssh
         PKG=$(find sdk/bin/packages/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" 2>/dev/null | head -n 1)
         if [ -z "$PKG" ]; then
           PKG=$(find sdk/bin/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" | head -n 1)
