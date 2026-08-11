@@ -56,10 +56,8 @@ local function get_system_info()
     -- 2. Deteksi Arsitektur Lengkap (Sub-target)
     local arch = ""
     if not is_apk then
-        -- OpenWrt 24: Ambil arsitektur paling spesifik dari OPKG (skip all / noarch)
         arch = sys.exec("opkg print-architecture 2>/dev/null | grep -v 'all 1' | grep -v 'noarch 1' | sort -n -k 2 -r | head -n 1 | awk '{print $2}'"):gsub("%s+", "")
     else
-        -- OpenWrt 25: Ambil dari apk --print-arch atau board info
         arch = sys.exec("apk --print-arch 2>/dev/null"):gsub("%s+", "")
     end
     
@@ -67,20 +65,24 @@ local function get_system_info()
         arch = sys.exec("uname -m 2>/dev/null"):gsub("%s+", "")
     end
 
-    -- Normalisasi beberapa nama arch jika diperlukan
     if arch == "x86-64" then arch = "x86_64" end
 
     -- 3. Deteksi Versi Aplikasi Terinstal Saat Ini
-    local cur_ver = ""
-    if is_apk then
-        local raw = sys.exec("apk info passwall-ssh 2>/dev/null | head -n 1"):gsub("%s+", " ")
-        cur_ver = raw:match("passwall%-ssh%-([%d%.%-_r]+)") or ""
-    else
-        cur_ver = sys.exec("opkg list-installed passwall-ssh 2>/dev/null | awk '{print $3}'"):gsub("%s+", "")
-    end
+    local cur_ver = read_file("/usr/share/passwall-ssh/version")
     if cur_ver == "" then
-        cur_ver = read_file("/usr/share/passwall-ssh/version")
+        if is_apk then
+            local raw = sys.exec("apk info passwall-ssh 2>/dev/null | head -n 1"):gsub("%s+", " ")
+            cur_ver = raw:match("passwall%-ssh%-([%d%.%-_r]+)") or ""
+        else
+            cur_ver = sys.exec("opkg status passwall-ssh 2>/dev/null | grep -i '^Version:' | awk '{print $2}'"):gsub("%s+", "")
+            if cur_ver == "" then
+                cur_ver = sys.exec("opkg list-installed passwall-ssh 2>/dev/null | awk '{print $3}'"):gsub("%s+", "")
+            end
+        end
     end
+
+    -- Normalisasi string versi (buang prefix 'v' dan suffix revisi '-r1' / '-1')
+    cur_ver = cur_ver:gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
     if cur_ver == "" then cur_ver = "Unknown" end
 
     return {
@@ -108,9 +110,10 @@ function action_check_app_update()
     
     local sys_info = get_system_info()
     
-    -- Ambil header Location tanpa menggunakan GitHub API
-    local cmd = "curl -sI -m 8 'https://github.com/avidemx/Passwall-SSH/releases/latest' | grep -i '^location:' | awk '{print $2}'"
-    local loc_header = sys.exec(cmd):gsub("[\r\n%s]+", "")
+    -- 1. Ambil baris Location TERAKHIR (tail -n 1) dan bersihkan whitespace/CRLF
+    local cmd = "curl -sIL -m 10 'https://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'"
+    local loc_header = sys.exec(cmd) or ""
+    loc_header = loc_header:gsub("[\r\n%s]+", "")
     
     local result = {
         success = false,
@@ -122,15 +125,25 @@ function action_check_app_update()
         message = ""
     }
     
-    -- Ekstrak tag rilis dari URL location (contoh: .../releases/tag/v4.1.0 atau .../releases/tag/4.1.0)
-    local raw_tag = loc_header:match("/releases/tag/(.+)$")
+    -- 2. Ekstrak nama tag dari URL (contoh: .../releases/tag/v4.2.0 atau .../releases/tag/v4.2)
+    local raw_tag = loc_header:match("/releases/tag/([^/?#]+)")
+    
+    -- Fallback jika redirect HEAD kosong: gunakan GitHub API cepat
+    if not raw_tag or raw_tag == "" then
+        local api_cmd = "curl -skL -m 8 -H 'User-Agent: OpenWrt' 'https://api.github.com/repos/avidemx/Passwall-SSH/releases/latest' 2>/dev/null"
+        local api_res = sys.exec(api_cmd) or ""
+        local api_json = json.parse(api_res)
+        if api_json and api_json.tag_name then
+            raw_tag = api_json.tag_name
+        end
+    end
     
     if raw_tag and raw_tag ~= "" then
         local latest_tag = raw_tag:gsub("^v", "")
         result.success = true
         result.latest_version = latest_tag
         
-        -- Susun nama file target sesuai format penamaan rilis
+        -- Susun nama file target sesuai pola rilis: passwall-ssh_{OS}_{TAG}_{ARCH}.{EXT}
         local target_file = string.format("passwall-ssh_%s_%s_%s.%s", 
             sys_info.os_ver, 
             latest_tag, 
@@ -138,7 +151,7 @@ function action_check_app_update()
             sys_info.pkg_ext
         )
         
-        -- Susun URL download langsung ke aset rilis
+        -- Susun URL download
         local dl_url = string.format("https://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
             raw_tag, 
             target_file
@@ -147,15 +160,16 @@ function action_check_app_update()
         result.download_url = dl_url
         result.asset_name = target_file
         
-        -- Komparasi versi saat ini dengan versi rilis terbaru
-        local clean_cur = tostring(sys_info.cur_ver):gsub("%-r%d+", ""):gsub("^v", "")
-        local clean_latest = tostring(latest_tag):gsub("%-r%d+", ""):gsub("^v", "")
+        -- Normalisasi string versi untuk komparasi bersih
+        local clean_cur = tostring(sys_info.cur_ver):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
+        local clean_latest = tostring(latest_tag):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
         
-        if clean_latest ~= clean_cur and sys_info.cur_ver ~= latest_tag then
+        -- Cek apakah versi GitHub berbeda dengan versi lokal
+        if clean_latest ~= clean_cur then
             result.has_update = true
         end
     else
-        result.message = "Gagal mengambil info rilis dari GitHub."
+        result.message = "Gagal mendeteksi rilis terbaru dari GitHub."
     end
     
     luci.http.prepare_content("application/json")
@@ -175,7 +189,7 @@ function action_do_app_update()
         EXT="%s"
         PKG_FILE="/tmp/passwall_update_pkg.${EXT}"
         
-        # 1. Download Package
+        # 1. Download Package dengan ekstensi yang benar
         rm -f /tmp/passwall_update_pkg*
         curl -skL -m 60 "$URL" -o "$PKG_FILE"
         if [ ! -s "$PKG_FILE" ]; then
@@ -183,14 +197,14 @@ function action_do_app_update()
             exit 1
         fi
         
-        # 2. Backup Config Settingan & State
+        # 2. Backup Config Settingan
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
         
         # 3. Stop Service Sebelum Update
         /etc/init.d/passwall-ssh stop >/dev/null 2>&1
         
-        # 4. Install Sesuai Package Manager dengan Ekstensi Jelas
+        # 4. Install Sesuai Package Manager
         INSTALL_STATUS=0
         if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
             apk add --allow-untrusted --force-overwrite --upgrade "$PKG_FILE" >/tmp/passwall_install.log 2>&1
@@ -201,9 +215,8 @@ function action_do_app_update()
         fi
         
         if [ $INSTALL_STATUS -ne 0 ]; then
-            # Kembalikan config jika install gagal
             [ -f /tmp/passwall-ssh.bak ] && cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
-            ERR_MSG=$(cat /tmp/passwall_install.log | tr '\n' ' ')
+            ERR_MSG=$(cat /tmp/passwall_install.log 2>/dev/null | tr '\n' ' ')
             echo "ERROR: Install failed - $ERR_MSG"
             exit 1
         fi
@@ -214,7 +227,7 @@ function action_do_app_update()
             rm -f /tmp/passwall-ssh.bak
         fi
         
-        # 6. Bersihkan file instalasi & Cache LuCI agar perubahan versi langsung terbaca
+        # 6. Bersihkan temporary file & Cache LuCI
         rm -f "$PKG_FILE" /tmp/passwall_install.log
         rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
         
