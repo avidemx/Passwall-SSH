@@ -12,12 +12,12 @@ include $(INCLUDE_DIR)/package.mk
 define Package/passwall-ssh
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=SSH Tunnel Client with Stunnel and BadVPN Tun2Socks
+  TITLE:=SSH Tunnel Client with Stunnel and BadVPN-tun2socks
   DEPENDS:=+sshpass +curl +resolveip +openssh-client +stunnel +kmod-tun +dnsproxy +ip-full +lua +luasocket +luci-compat
 endef
 
 define Package/passwall-ssh/description
-  SSH Tunnel Client with Stunnel and BadVPN Tun2Socks for OpenWrt.
+  SSH Tunnel Client with Stunnel and BadVPN-tun2socks.
 endef
 
 define Package/passwall-ssh/conffiles
@@ -46,10 +46,17 @@ endef
 
 define Package/passwall-ssh/prerm
 #!/bin/sh
-[ -n "$${IPKG_INSTROOT}" ] && exit 0
 
-if [ -x "/etc/init.d/passwall-ssh" ]; then
-	/etc/init.d/passwall-ssh stop >/dev/null 2>&1 || true
+[ -x /etc/init.d/passwall-ssh ] && /etc/init.d/passwall-ssh stop >/dev/null 2>&1 || true
+
+if [ -x /etc/init.d/stunnel ]; then
+    /etc/init.d/stunnel stop >/dev/null 2>&1 || true
+    /etc/init.d/stunnel disable >/dev/null 2>&1 || true
+fi
+
+if [ -x /etc/init.d/dnsproxy ]; then
+    /etc/init.d/dnsproxy stop >/dev/null 2>&1 || true
+    /etc/init.d/dnsproxy disable >/dev/null 2>&1 || true
 fi
 
 exit 0
@@ -57,14 +64,6 @@ endef
 
 define Package/passwall-ssh/postinst
 #!/bin/sh
-[ -n "$${IPKG_INSTROOT}" ] && exit 0
-
-for svc in passwall-ssh stunnel dnsproxy; do
-	[ -x "/etc/init.d/$$svc" ] || continue
-	/etc/init.d/$$svc stop >/dev/null 2>&1 || true
-	/etc/init.d/$$svc disable >/dev/null 2>&1 || true
-done
-
 exit 0
 endef
 
