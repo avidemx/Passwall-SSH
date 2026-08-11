@@ -107,9 +107,13 @@ jobs:
         cp -a package/badvpn sdk/package/
         cp -a package/passwall-ssh sdk/package/
 
-    - name: Configure SDK
+    - name: Configure SDK & Set Version
       working-directory: sdk
       run: |
+        # Update versi langsung di dalam SDK
+        sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+        sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/passwall-ssh/Makefile
+        
         echo "CONFIG_PACKAGE_badvpn-tun2socks=y" >> .config
         echo "CONFIG_PACKAGE_passwall-ssh=y" >> .config
         make defconfig
@@ -131,8 +135,12 @@ jobs:
           exit 1
         fi
         mkdir -p package/passwall-ssh/files/usr/bin/
+        mkdir -p package/passwall-ssh/files/usr/share/passwall-ssh/
         cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         chmod +x package/passwall-ssh/files/usr/bin/badvpn-tun2socks
+        
+        # Tulis versi bersih ke file share router
+        echo "$APP_VERSION" > package/passwall-ssh/files/usr/share/passwall-ssh/version
 
     - name: 3. Compile Passwall-SSH
       working-directory: sdk
@@ -142,13 +150,18 @@ jobs:
     - name: Prepare Release Artifacts
       run: |
         mkdir -p release
-        PKG=$(find sdk/bin/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" | head -n 1)
+        # Cari file spesifik hasil build passwall-ssh
+        PKG=$(find sdk/bin/packages/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" 2>/dev/null | head -n 1)
+        if [ -z "$PKG" ]; then
+          PKG=$(find sdk/bin/ -name "passwall-ssh*.${{ matrix.owrt.ext }}" | head -n 1)
+        fi
         if [ -z "$PKG" ]; then
           echo "Error: file passwall-ssh*.${{ matrix.owrt.ext }} tidak ditemukan!"
           exit 1
         fi
         CUSTOM_NAME="passwall-ssh_${{ matrix.owrt.major }}_${APP_VERSION}_${{ matrix.arch_item.arch }}.${{ matrix.owrt.ext }}"
         cp "$PKG" "release/$CUSTOM_NAME"
+        echo "Generated package: $CUSTOM_NAME"
         ls -lh release/
 
     - name: Upload Artifacts per Matrix
