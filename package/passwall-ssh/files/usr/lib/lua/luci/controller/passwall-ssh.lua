@@ -118,7 +118,7 @@ function action_check_app_update()
     local sys_info = get_system_info()
     
     -- 1. Ambil baris Location TERAKHIR (tail -n 1) dan bersihkan whitespace/CRLF
-    local cmd = "curl -sIL -m 10 'https://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'"
+    local cmd = "curl -sIL -m 10 -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)' 'https://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'"
     local loc_header = sys.exec(cmd) or ""
     loc_header = loc_header:gsub("[\r\n%s]+", "")
     
