@@ -39,36 +39,43 @@ end
 local function get_system_info()
     local sys = require "luci.sys"
     local os_rel = sys.exec("cat /etc/os-release 2>/dev/null") or ""
+    local owrt_rel = sys.exec("cat /etc/openwrt_release 2>/dev/null") or ""
     
-    -- 1. Deteksi Versi OS (24, 25, dst)
+    -- 1. Deteksi Versi OS
     local os_ver = os_rel:match('VERSION_ID="([%d]+)') or ""
+    local has_apk = (sys.call("command -v apk >/dev/null 2>&1") == 0)
+    
     if os_ver == "" then
-        if sys.call("command -v apk >/dev/null 2>&1") == 0 then
-            os_ver = "25"
-        else
-            os_ver = "24"
-        end
+        os_ver = has_apk and "25" or "24"
     end
     
-    local is_apk = (os_ver == "25") or (sys.call("command -v apk >/dev/null 2>&1") == 0)
+    local is_apk = (os_ver == "25") or has_apk
     local pkg_ext = is_apk and "apk" or "ipk"
     
-    -- 2. Deteksi Arsitektur Lengkap (Sub-target)
-    local arch = ""
-    if not is_apk then
-        arch = sys.exec("opkg print-architecture 2>/dev/null | grep -v 'all 1' | grep -v 'noarch 1' | sort -n -k 2 -r | head -n 1 | awk '{print $2}'"):gsub("%s+", "")
-    else
-        arch = sys.exec("apk --print-arch 2>/dev/null"):gsub("%s+", "")
+    -- 2. Deteksi Arsitektur Lengkap (Prioritas: /etc/openwrt_release -> opkg -> apk -> uname)
+    local arch = owrt_rel:match("DISTRIB_ARCH=['\"]?([^'\"%s\n]+)") or ""
+    
+    if arch == "" then
+        if not is_apk then
+            arch = sys.exec("opkg print-architecture 2>/dev/null | grep -vE '(all|noarch)' | sort -n -k 2 -r | head -n 1 | awk '{print $2}'"):gsub("%s+", "")
+        else
+            arch = sys.exec("apk --print-arch 2>/dev/null"):gsub("%s+", "")
+        end
     end
     
     if arch == "" then
         arch = sys.exec("uname -m 2>/dev/null"):gsub("%s+", "")
     end
 
+    -- Normalisasi umum
     if arch == "x86-64" then arch = "x86_64" end
 
-    -- 3. Deteksi Versi Aplikasi Terinstal Saat Ini
-    local cur_ver = read_file("/usr/share/passwall-ssh/version")
+    -- 3. Deteksi Versi Aplikasi Terinstal
+    local cur_ver = ""
+    if type(read_file) == "function" then
+        cur_ver = read_file("/usr/share/passwall-ssh/version") or ""
+    end
+
     if cur_ver == "" then
         if is_apk then
             local raw = sys.exec("apk info passwall-ssh 2>/dev/null | head -n 1"):gsub("%s+", " ")
@@ -81,7 +88,7 @@ local function get_system_info()
         end
     end
 
-    -- Normalisasi string versi (buang prefix 'v' dan suffix revisi '-r1' / '-1')
+    -- Normalisasi string versi
     cur_ver = cur_ver:gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
     if cur_ver == "" then cur_ver = "Unknown" end
 
@@ -200,24 +207,41 @@ function action_do_app_update()
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
         
-        # 3. Stop Service Sebelum Update
+        # 3. Stop & Matikan Respawn Service Sebelum Update
         if [ -x "/etc/init.d/passwall-ssh" ]; then
             /etc/init.d/passwall-ssh stop >/dev/null 2>&1
         fi
         
+        # Wajib stop & disable service bawaan agar procd melepas 'respawn'
+        if [ -x "/etc/init.d/stunnel" ]; then
+            /etc/init.d/stunnel stop >/dev/null 2>&1
+            /etc/init.d/stunnel disable >/dev/null 2>&1
+        fi
+        if [ -x "/etc/init.d/dnsproxy" ]; then
+            /etc/init.d/dnsproxy stop >/dev/null 2>&1
+            /etc/init.d/dnsproxy disable >/dev/null 2>&1
+        fi
+
+        sleep 2
+                
         # 4. Install Sesuai Package Manager (MODE OFFLINE PENUH)
         INSTALL_STATUS=0
         if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
-            apk add --no-network --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            apk add --no-network --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/etc/passwall-ssh.log 2>&1
             INSTALL_STATUS=$?
         else
-            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/passwall_install.log 2>&1
+            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/etc/passwall-ssh.log 2>&1
             INSTALL_STATUS=$?
+        fi
+        
+        if [ -x "/etc/init.d/stunnel" ]; then
+            /etc/init.d/stunnel stop >/dev/null 2>&1
+            /etc/init.d/stunnel disable >/dev/null 2>&1
         fi
         
         if [ $INSTALL_STATUS -ne 0 ]; then
             [ -f /tmp/passwall-ssh.bak ] && cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
-            ERR_MSG=$(cat /tmp/passwall_install.log 2>/dev/null | tr '\n' ' ')
+            ERR_MSG=$(cat /tmp/etc/passwall-ssh.log 2>/dev/null | tr '\n' ' ')
             echo "ERROR: Install failed - $ERR_MSG"
             exit 1
         fi
@@ -228,8 +252,8 @@ function action_do_app_update()
             rm -f /tmp/passwall-ssh.bak
         fi
         
-        # 6. Bersihkan file temporary & Cache LuCI
-        rm -f "$PKG_FILE" /tmp/passwall_install.log
+        # 6. Bersihkan file temporary, file .apk-new & Cache LuCI
+        rm -f "$PKG_FILE" /etc/config/passwall-ssh.apk-new
         rm -rf /tmp/luci-indexcache /tmp/luci-modulecache /tmp/luci-indexcache.*
         
         # 7. Enable & Start kembali jika sebelumnya aktif
