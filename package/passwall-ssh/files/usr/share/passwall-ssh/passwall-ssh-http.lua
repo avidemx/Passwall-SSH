@@ -79,7 +79,6 @@ end
 
 local USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
--- Inisialisasi seed acak sekali di awal (Aman untuk CPU 32-bit OpenWrt)
 local t_sec = os.time()
 local t_ms = math.floor((socket.gettime() % 1) * 1000)
 math.randomseed(t_sec + t_ms)
@@ -95,13 +94,11 @@ local function generate_ws_key()
     return table.concat(key)
 end
 
--- Helper: Pengganti string aman Lua (mencegah crash % capture index)
 local function safe_sub(str, pattern, repl)
     if not str then return "" end
     return (str:gsub(pattern, function() return tostring(repl or "") end))
 end
 
--- 1. Penanganan Pengulangan Token [token*N] (misal: [crlf*2])
 local function expand_multipliers(payload)
     if not payload then return "" end
     return payload:gsub("%[([%w_%-]+)%*(%d+)%]", function(token, count)
@@ -112,7 +109,6 @@ end
 
 local RAW_EXPANDED = expand_multipliers(RAW_PAYLOAD)
 
--- 2. Static Pre-parsing
 local STATIC_PAYLOAD = RAW_EXPANDED
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[crlf%]", "\r\n")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[lf%]", "\n")
@@ -128,7 +124,6 @@ STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_port%]", "443")
 
 local rotate_index = 0
 
--- 3. Dynamic Token Parsing (Aman & Stabil)
 local function parse_tags_dynamic(payload, host, port, client_raw_request)
     if not payload then return "" end
     
@@ -136,7 +131,6 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
     local SSH_PORT = tostring(ENV.HOST_PORT or port or 80)
     local SSH_HOST_PORT = SSH_HOST .. ":" .. SSH_PORT
 
-    -- Deteksi Method HTTP Valid (Abaikan banner SSH-2.0)
     local method = "GET"
     if client_raw_request and client_raw_request ~= "" then
         local m = client_raw_request:match("^([A-Z]+)%s+")
@@ -148,7 +142,6 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
     end
 
     local res = payload
-    -- Server & SSH Alias
     res = safe_sub(res, "%[host%]", SSH_HOST)
     res = safe_sub(res, "%[server%]", SSH_HOST)
     res = safe_sub(res, "%[ssh%]", SSH_HOST)
@@ -162,7 +155,6 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
     res = safe_sub(res, "%[host_port%]", SSH_HOST_PORT)
     res = safe_sub(res, "%[ip_port%]", SSH_HOST_PORT)
     
-    -- WebSocket & Request Tokens
     res = (res:gsub("%[ws_key%]", generate_ws_key))
     res = (res:gsub("%[ws%-key%]", generate_ws_key))
     res = safe_sub(res, "%[method%]", method)
@@ -171,7 +163,6 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
     res = safe_sub(res, "%[realData%]", client_raw_request or "")
     res = safe_sub(res, "%[netData%]", client_raw_request or "")
 
-    -- Evaluator Rotate & Random
     res = res:gsub("%[rotate=([^%]]+)%]", function(list)
         local items = {}
         for item in list:gmatch("[^;]+") do table.insert(items, item) end
@@ -194,7 +185,6 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
     return res
 end
 
--- INI ADALAH FUNGSI YANG SEBELUMNYA TERHAPUS
 local function generate_steps(payload, is_connect)
     local steps = {}
     local pos_ds = payload:find("[delay_split]", 1, true)
@@ -202,14 +192,14 @@ local function generate_steps(payload, is_connect)
     
     if pos_ds then
         table.insert(steps, { action = "SEND", data = payload:sub(1, pos_ds - 1) })
-        table.insert(steps, { action = "SEND_BANNER" })
         table.insert(steps, { action = "DELAY", ms = tonumber(ENV.DELAY) or 1000 })
         table.insert(steps, { action = "SEND", data = payload:sub(pos_ds + 13) })
+        table.insert(steps, { action = "SEND_BANNER" })
     elseif pos_s then
         table.insert(steps, { action = "SEND", data = payload:sub(1, pos_s - 1) })
-        table.insert(steps, { action = "SEND_BANNER" })
         table.insert(steps, { action = "WAIT_INCOMING_HTTP" })
         table.insert(steps, { action = "SEND", data = payload:sub(pos_s + 7) })
+        table.insert(steps, { action = "SEND_BANNER" }) 
     else
         table.insert(steps, { action = "SEND", data = payload })
         table.insert(steps, { action = "SEND_BANNER" })
@@ -305,7 +295,6 @@ while true do
     local now = socket.gettime()
     local min_timeout = 1.0
 
-    -- Evaluasi Timers (Idle & Payload Delays)
     for sock, sess in pairs(session_pairs) do
         if sock == sess.client and not sess.closed then 
             if now - sess.last_active > 300 then
@@ -326,7 +315,6 @@ while true do
 
     local readable, writable, _ = socket.select(read_sockets, write_sockets, min_timeout)
 
-    -- PROCESS WRITABLE (Hanya untuk Asynchronous Write Buffer)
     if writable then
         for _, sock in ipairs(writable) do
             local sess = session_pairs[sock]
@@ -352,7 +340,6 @@ while true do
         end
     end
 
-    -- PROCESS READABLE
     if readable then
         for _, sock in ipairs(readable) do
             if sock == server then
@@ -399,7 +386,6 @@ while true do
                                 
                                 sess.banner = chunk 
                                 
-                                -- KONEKSI AMAN: Menggunakan short-timeout blocking connect (2.5 detik)
                                 local remote = socket.tcp()
                                 remote:settimeout(2.5) 
                                 
@@ -409,7 +395,6 @@ while true do
                                     log("Upstream Connect Failed: " .. tostring(conn_err))
                                     cleanup(sess)
                                 else
-                                    -- Sukses connect, langsung ubah ke mode non-blocking untuk performa penuh
                                     remote:settimeout(0)
                                     remote:setoption("tcp-nodelay", true)
                                     sess.remote = remote
@@ -444,8 +429,13 @@ while true do
                                         log("> Injecting HTTP 200 OK (Buffered)")
                                         queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
                                         sess.in_need_200 = false
-                                        local end_header = chunk:find("\r\n\r\n")
-                                        if end_header then chunk = chunk:sub(end_header + 4) else chunk = "" end
+                                    end
+                                    
+                                    local end_header = chunk:find("\r\n\r\n")
+                                    if end_header then 
+                                        chunk = chunk:sub(end_header + 4) 
+                                    else 
+                                        chunk = "" 
                                     end
                                     
                                     if sess.out_state == "WAIT_INCOMING_HTTP" then
