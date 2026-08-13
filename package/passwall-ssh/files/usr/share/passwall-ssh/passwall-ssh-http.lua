@@ -197,8 +197,8 @@ end
 -- INI ADALAH FUNGSI YANG SEBELUMNYA TERHAPUS
 local function generate_steps(payload, is_connect)
     local steps = {}
-    local pos_ds = payload:find("%[delay_split%]", 1, true)
-    local pos_s = payload:find("%[split%]", 1, true)
+    local pos_ds = payload:find("[delay_split]", 1, true)
+    local pos_s = payload:find("[split]", 1, true)
     
     if pos_ds then
         table.insert(steps, { action = "SEND", data = payload:sub(1, pos_ds - 1) })
