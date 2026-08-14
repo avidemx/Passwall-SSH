@@ -50,7 +50,6 @@ define Package/passwall-ssh/prerm
 
 /etc/init.d/stunnel disable >/dev/null 2>&1 || true
 /etc/init.d/dnsproxy disable >/dev/null 2>&1 || true
-/etc/init.d/passwall-ssh stop >/dev/null 2>&1 || true
 /etc/init.d/stunnel stop >/dev/null 2>&1 || true
 /etc/init.d/dnsproxy stop >/dev/null 2>&1 || true
 
