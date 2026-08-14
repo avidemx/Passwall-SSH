@@ -231,22 +231,18 @@ header_ui.cfgvalue = function()
         <div id="update-container" style="display: none;">
             <div class="update-card">
                 <div class="update-row">
-                    <div class="update-label">Architecture :</div>
-                    <div class="update-value" id="upd-arch">Detecting...</div>
+                    <div class="update-label">Firmware Version :</div>
+                    <div class="update-value" id="upd-fw-ver">Detecting...</div>
                 </div>
                 <div class="update-row">
                     <div class="update-label">Passwall-SSH Version :</div>
                     <div class="update-value" id="upd-cur-ver">Detecting...</div>
                 </div>
                 <div style="margin-top: 5px;">
-                    <button type="button" id="btn-check-update" class="btn-update btn-check" onclick="checkAppUpdate()">Check Update</button>
+                    <button type="button" id="btn-app-update" class="btn-update btn-check" onclick="handleAppUpdate()">Check Update</button>
                 </div>
                 
                 <div id="update-check-result" style="display: none; font-size: 14px; font-weight: bold; margin-top: 5px;"></div>
-                
-                <div id="update-action-box" style="display: none;">
-                    <button type="button" id="btn-do-update" class="btn-update btn-apply" onclick="executeAppUpdate()">Click To Update</button>
-                </div>
             </div>
         </div>
 
@@ -270,6 +266,7 @@ header_ui.cfgvalue = function()
         var startTimeEpoch = 0;
         var timerInterval = null;
         var latestDownloadUrl = "";
+        var updateReady = false;
 
         function formatBytes(bytes) {
             bytes = parseInt(bytes);
@@ -376,9 +373,10 @@ header_ui.cfgvalue = function()
             fetch(GET_APP_INFO_URL)
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
-                    var archEl = document.getElementById('upd-arch');
+                    var fwVerEl = document.getElementById('upd-fw-ver');
                     var verEl = document.getElementById('upd-cur-ver');
-                    if (archEl) archEl.innerText = data.arch || "Unknown";
+                    
+                    if (fwVerEl) fwVerEl.innerText = (data.fw_ver || "Unknown") + " - " + (data.arch || "Unknown");
                     if (verEl) verEl.innerText = data.version || "Unknown";
                 });
         }
@@ -419,95 +417,103 @@ header_ui.cfgvalue = function()
             }
         }
 
-        window.checkAppUpdate = function() {
-            var btn = document.getElementById('btn-check-update');
+        window.handleAppUpdate = function() {
+            var btn = document.getElementById('btn-app-update');
             var resBox = document.getElementById('update-check-result');
-            var actBox = document.getElementById('update-action-box');
             
-            btn.classList.add('btn-disabled');
-            btn.disabled = true;
-            btn.innerText = "Checking...";
-            resBox.style.display = "none";
-            actBox.style.display = "none";
+            if (!updateReady) {
+                // Proses Cek Update
+                btn.classList.add('btn-disabled');
+                btn.disabled = true;
+                btn.innerText = "Checking...";
+                resBox.style.display = "none";
 
-            fetch(CHECK_APP_UPDATE_URL)
+                fetch(CHECK_APP_UPDATE_URL)
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        btn.classList.remove('btn-disabled');
+                        btn.disabled = false;
+                        resBox.style.display = "block";
+
+                        if (!res.success) {
+                            resBox.innerHTML = '<span style="color:#ff4c4c;">Failed to check update.</span>';
+                            btn.innerText = "Check Update";
+                            return;
+                        }
+
+                        if (res.has_update) {
+                            latestDownloadUrl = res.download_url;
+                            resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + '</span>';
+                            btn.innerText = "Click to update";
+                            btn.classList.remove('btn-check');
+                            btn.classList.add('btn-apply');
+                            updateReady = true;
+                        } else {
+                            resBox.innerHTML = '<span style="color:#06BA06;">Latest Version ' + res.latest_version + ', your app up to date.</span>';
+                            btn.innerText = "Check Update";
+                        }
+                    })
+                    .catch(function() {
+                        btn.classList.remove('btn-disabled');
+                        btn.disabled = false;
+                        btn.innerText = "Check Update";
+                        resBox.style.display = "block";
+                        resBox.innerHTML = '<span style="color:#ff4c4c;">Connection error during update check.</span>';
+                    });
+            } else {
+                // Proses Eksekusi Update
+                btn.classList.add('btn-disabled');
+                btn.disabled = true;
+
+                btn.innerText = "[Downloading]";
+                setTimeout(function() {
+                    if (btn.innerText === "[Downloading]") btn.innerText = "[Unpacking]";
+                }, 3000);
+                setTimeout(function() {
+                    if (btn.innerText === "[Unpacking]") btn.innerText = "[Moving]";
+                }, 6000);
+
+                var formData = new FormData();
+                formData.append("url", latestDownloadUrl);
+
+                fetch(DO_APP_UPDATE_URL, {
+                    method: "POST",
+                    body: formData
+                })
                 .then(function(r) { return r.json(); })
                 .then(function(res) {
-                    btn.classList.remove('btn-disabled');
-                    btn.disabled = false;
-                    btn.innerText = "Check Update";
-                    resBox.style.display = "block";
-
-                    if (!res.success) {
-                        resBox.innerHTML = '<span style="color:#ff4c4c;">Failed to check update.</span>';
-                        return;
-                    }
-
-                    if (res.has_update) {
-                        latestDownloadUrl = res.download_url;
-                        resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + '</span>';
-                        actBox.style.display = "block";
+                    if (res.status === "success") {
+                        btn.innerText = "[Update Successfull]";
+                        btn.style.background = "#28a745";
+                        setTimeout(function() {
+                            location.reload();
+                        }, 2000);
                     } else {
-                        resBox.innerHTML = '<span style="color:#06BA06;">Latest Version ' + res.latest_version + ', your app up to date.</span>';
-                        actBox.style.display = "none";
+                        btn.innerText = "Update Failed!";
+                        btn.style.background = "#dc3545";
+                        setTimeout(function() {
+                            btn.style.background = "";
+                            btn.classList.remove('btn-disabled', 'btn-apply');
+                            btn.classList.add('btn-check');
+                            btn.disabled = false;
+                            updateReady = false;
+                            btn.innerText = "Check Update";
+                        }, 3000);
                     }
                 })
-                .catch(function() {
-                    btn.classList.remove('btn-disabled');
-                    btn.disabled = false;
-                    btn.innerText = "Check Update";
-                    resBox.style.display = "block";
-                    resBox.innerHTML = '<span style="color:#ff4c4c;">Connection error during update check.</span>';
-                });
-        };
-
-        window.executeAppUpdate = function() {
-            var btn = document.getElementById('btn-do-update');
-            var chkBtn = document.getElementById('btn-check-update');
-            btn.classList.add('btn-disabled');
-            btn.disabled = true;
-            chkBtn.classList.add('btn-disabled');
-            chkBtn.disabled = true;
-
-            // Animasi transisi status
-            btn.innerText = "[Downloading]";
-            setTimeout(function() {
-                if (btn.innerText === "[Downloading]") btn.innerText = "[Unpacking]";
-            }, 3000);
-            setTimeout(function() {
-                if (btn.innerText === "[Unpacking]") btn.innerText = "[Moving]";
-            }, 6000);
-
-            var formData = new FormData();
-            formData.append("url", latestDownloadUrl);
-
-            fetch(DO_APP_UPDATE_URL, {
-                method: "POST",
-                body: formData
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(res) {
-                if (res.status === "success") {
-                    btn.innerText = "[Update Successfull]";
-                    btn.style.background = "#28a745";
-                    setTimeout(function() {
-                        location.reload();
-                    }, 2000);
-                } else {
-                    btn.innerText = "Update Failed!";
+                .catch(function(e) {
+                    btn.innerText = "Error!";
                     btn.style.background = "#dc3545";
-                    alert("Update failed: " + (res.message || "Unknown error"));
-                    btn.classList.remove('btn-disabled');
-                    btn.disabled = false;
-                }
-            })
-            .catch(function(e) {
-                btn.innerText = "Error!";
-                btn.style.background = "#dc3545";
-                alert("Network error while updating");
-                btn.classList.remove('btn-disabled');
-                btn.disabled = false;
-            });
+                    setTimeout(function() {
+                        btn.style.background = "";
+                        btn.classList.remove('btn-disabled', 'btn-apply');
+                        btn.classList.add('btn-check');
+                        btn.disabled = false;
+                        updateReady = false;
+                        btn.innerText = "Check Update";
+                    }, 3000);
+                });
+            }
         };
 
         function touchCheck(host, elId) {
