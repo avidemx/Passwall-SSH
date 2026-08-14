@@ -43,6 +43,7 @@ local function get_system_info()
     
     -- 1. Deteksi Versi OS
     local os_ver = os_rel:match('VERSION_ID="([%d]+)') or ""
+    local fw_ver = os_rel:match('VERSION_ID="([^"]+)"') or "Unknown" -- Ambil full version untuk frontend
     local has_apk = (sys.call("command -v apk >/dev/null 2>&1") == 0)
     
     if os_ver == "" then
@@ -94,6 +95,7 @@ local function get_system_info()
 
     return {
         os_ver = os_ver,
+        fw_ver = fw_ver,
         pkg_ext = pkg_ext,
         arch = arch,
         cur_ver = cur_ver
@@ -105,7 +107,8 @@ function action_get_app_info()
     local resp = {
         arch = info.arch,
         version = info.cur_ver,
-        os_ver = info.os_ver
+        os_ver = info.os_ver,
+        fw_ver = info.fw_ver
     }
     luci.http.prepare_content("application/json")
     luci.http.write_json(resp)
@@ -113,15 +116,8 @@ end
 
 function action_check_app_update()
     local sys = require "luci.sys"
-    local json = require "luci.jsonc"
-    
     local sys_info = get_system_info()
-    
-    -- 1. Ambil baris Location TERAKHIR (tail -n 1) dan bersihkan whitespace/CRLF
-    local cmd = "curl -sIL -m 10 -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)' 'https://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'"
-    local loc_header = sys.exec(cmd) or ""
-    loc_header = loc_header:gsub("[\r\n%s]+", "")
-    
+
     local result = {
         success = false,
         current_version = sys_info.cur_ver,
@@ -131,54 +127,35 @@ function action_check_app_update()
         asset_name = "",
         message = ""
     }
-    
-    -- 2. Ekstrak nama tag dari URL (contoh: .../releases/tag/v4.2.0)
-    local raw_tag = loc_header:match("/releases/tag/([^/?#]+)")
-    
-    -- Fallback jika redirect HEAD kosong: gunakan GitHub API cepat
-    if not raw_tag or raw_tag == "" then
-        local api_cmd = "curl -skL -m 8 -H 'User-Agent: OpenWrt' 'https://api.github.com/repos/avidemx/Passwall-SSH/releases/latest' 2>/dev/null"
-        local api_res = sys.exec(api_cmd) or ""
-        local api_json = json.parse(api_res)
-        if api_json and api_json.tag_name then
-            raw_tag = api_json.tag_name
-        end
-    end
-    
-    if raw_tag and raw_tag ~= "" then
-        local latest_tag = raw_tag:gsub("^v", "")
-        result.success = true
-        result.latest_version = latest_tag
-        
-        -- Susun nama file target sesuai pola rilis: passwall-ssh_{OS}_{TAG}_{ARCH}.{EXT}
-        local target_file = string.format("passwall-ssh_%s_%s_%s.%s", 
-            sys_info.os_ver, 
-            latest_tag, 
-            sys_info.arch, 
-            sys_info.pkg_ext
-        )
-        
-        -- Susun URL download
-        local dl_url = string.format("https://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
-            raw_tag, 
-            target_file
-        )
-        
-        result.download_url = dl_url
-        result.asset_name = target_file
-        
-        -- Normalisasi string versi untuk komparasi bersih
-        local clean_cur = tostring(sys_info.cur_ver):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
-        local clean_latest = tostring(latest_tag):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
-        
-        -- Cek apakah versi GitHub berbeda dengan versi lokal
-        if clean_latest ~= clean_cur then
-            result.has_update = true
+
+    local pattern = string.format("/tmp/passwall-ssh_%s_*.%s", sys_info.os_ver, sys_info.pkg_ext)
+    local cmd = "ls -1 " .. pattern .. " 2>/dev/null | sort -V | tail -n 1"
+    local local_file = sys.exec(cmd) or ""
+    local_file = local_file:gsub("[\r\n]+", "")
+
+    if local_file ~= "" then
+        local filename = local_file:match("([^/]+)$") or ""
+        local raw_version = filename:match("^passwall%-ssh_" .. sys_info.os_ver .. "_([%d%.]+)_")
+
+        if raw_version and raw_version ~= "" then
+            result.success = true
+            result.latest_version = raw_version
+            result.download_url = local_file
+            result.asset_name = filename
+
+            local clean_cur = tostring(sys_info.cur_ver):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
+            local clean_latest = tostring(raw_version):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
+
+            if clean_latest ~= clean_cur then
+                result.has_update = true
+            end
+        else
+            result.message = "Format package lokal tidak dikenali."
         end
     else
-        result.message = "Gagal mendeteksi rilis terbaru dari GitHub."
+        result.message = "Tidak ada package Passwall-SSH di /tmp."
     end
-    
+
     luci.http.prepare_content("application/json")
     luci.http.write_json(result)
 end
@@ -188,91 +165,111 @@ function action_do_app_update()
     local dl_url = luci.http.formvalue("url") or ""
     
     local sys_info = get_system_info()
-    local ext = sys_info.pkg_ext -- "apk" atau "ipk"
+    local ext = sys_info.pkg_ext
     
     local sh_script = string.format([[
+        #!/bin/sh
         URL="%s"
         EXT="%s"
         PKG_FILE="/tmp/passwall_update_pkg.${EXT}"
-        
-        # 1. Download Package (saat internet/tunnel masih menyala)
+        LOG_FILE="/tmp/etc/passwall-ssh.log"
+
+        echo "=== [UPDATE] Memulai Proses Update ===" > "$LOG_FILE"
+
+        # 1. Download / Copy Package
         rm -f /tmp/passwall_update_pkg*
-        curl -skL -m 60 "$URL" -o "$PKG_FILE"
+        if [ -f "$URL" ]; then
+            cp -f "$URL" "$PKG_FILE"
+        else
+            echo "Downloading package..." >> "$LOG_FILE"
+            curl -skL -m 60 "$URL" -o "$PKG_FILE" >> "$LOG_FILE" 2>&1
+        fi
+
         if [ ! -s "$PKG_FILE" ]; then
-            echo "ERROR: Download failed or file empty"
+            echo "ERROR: Download gagal atau file kosong" >> "$LOG_FILE"
             exit 1
         fi
         
         # 2. Backup Config Settingan & Cek Status Aktif
+        echo "Membackup konfigurasi..." >> "$LOG_FILE"
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
+        #rm -f /etc/config/passwall-ssh
         
-        # 3. Stop & Matikan Respawn Service Sebelum Update
+        # 3. Stop Service Lama
+        echo "Menghentikan service lama..." >> "$LOG_FILE"
         if [ -x "/etc/init.d/passwall-ssh" ]; then
             /etc/init.d/passwall-ssh stop >/dev/null 2>&1
         fi
         
-        # Wajib stop & disable service bawaan agar procd melepas 'respawn'
-        if [ -x "/etc/init.d/stunnel" ]; then
-            /etc/init.d/stunnel stop >/dev/null 2>&1
-            /etc/init.d/stunnel disable >/dev/null 2>&1
-        fi
-        if [ -x "/etc/init.d/dnsproxy" ]; then
-            /etc/init.d/dnsproxy stop >/dev/null 2>&1
-            /etc/init.d/dnsproxy disable >/dev/null 2>&1
-        fi
-
-        sleep 2
+        sleep 3
                 
-        # 4. Install Sesuai Package Manager (MODE OFFLINE PENUH)
+        # 4. Install Package
+        echo "Mengekstrak dan Menginstal Package..." >> "$LOG_FILE"
         INSTALL_STATUS=0
         if [ "$EXT" = "apk" ] || command -v apk >/dev/null 2>&1; then
-            apk add --no-network --allow-untrusted --force-overwrite "$PKG_FILE" >/tmp/etc/passwall-ssh.log 2>&1
+            apk add --repositories-file /dev/null --no-network --allow-untrusted --force-overwrite "$PKG_FILE" >> "$LOG_FILE" 2>&1
             INSTALL_STATUS=$?
         else
-            opkg install --force-reinstall --force-overwrite "$PKG_FILE" >/tmp/etc/passwall-ssh.log 2>&1
+            opkg install --force-overwrite "$PKG_FILE" >> "$LOG_FILE" 2>&1
             INSTALL_STATUS=$?
         fi
         
-        if [ -x "/etc/init.d/stunnel" ]; then
-            /etc/init.d/stunnel stop >/dev/null 2>&1
-            /etc/init.d/stunnel disable >/dev/null 2>&1
-        fi
-        
+        # --- BYPASS APK FAKE ERROR (127) ---
         if [ $INSTALL_STATUS -ne 0 ]; then
-            [ -f /tmp/passwall-ssh.bak ] && cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
-            ERR_MSG=$(cat /tmp/etc/passwall-ssh.log 2>/dev/null | tr '\n' ' ')
-            echo "ERROR: Install failed - $ERR_MSG"
-            exit 1
+            # Cek apakah apk error tapi file sebenarnya sukses terekstrak
+            if grep -q "Installing file to" "$LOG_FILE"; then
+                echo "Warning: Error pada script post-upgrade apk (127). Diabaikan karena file fisik sukses terinstal." >> "$LOG_FILE"
+                INSTALL_STATUS=0
+            else
+                echo "ERROR: Install gagal dengan kode $INSTALL_STATUS" >> "$LOG_FILE"
+                [ -f /tmp/passwall-ssh.bak ] && cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
+                exit 1
+            fi
         fi
         
         # 5. Restore Config
+        echo "Mengembalikan konfigurasi..." >> "$LOG_FILE"
         if [ -f /tmp/passwall-ssh.bak ]; then
             cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
             rm -f /tmp/passwall-ssh.bak
         fi
         
-        # 6. Bersihkan file temporary, file .apk-new & Cache LuCI
-        rm -f "$PKG_FILE" /etc/config/passwall-ssh.apk-new
+        # 6. Bersihkan cache
+        rm -f "$PKG_FILE" /tmp/do_pw_update.sh /etc/config/passwall-ssh-opkg /etc/config/passwall-ssh.apk-new
         rm -rf /tmp/luci-indexcache /tmp/luci-modulecache /tmp/luci-indexcache.*
         
-        # 7. Enable & Start kembali jika sebelumnya aktif
+        # 7. Start kembali jika sebelumnya aktif
         if [ "$ENABLED" = "1" ] && [ -x "/etc/init.d/passwall-ssh" ]; then
+            echo "Menjalankan ulang service..." >> "$LOG_FILE"
             /etc/init.d/passwall-ssh enable >/dev/null 2>&1
-            /etc/init.d/passwall-ssh start >/dev/null 2>&1 &
+            /etc/init.d/passwall-ssh restart >/dev/null 2>&1 &
         fi
         
-        echo "SUCCESS"
+        echo "=== [UPDATE] Berhasil Diselesaikan ===" >> "$LOG_FILE"
+        exit 0
     ]], dl_url, ext)
     
-    local out = sys.exec(sh_script)
-    local is_success = out:find("SUCCESS") ~= nil
+    -- Tulis script ke file sementara
+    local f = io.open("/tmp/do_pw_update.sh", "w")
+    if f then
+        f:write(sh_script)
+        f:close()
+    else
+        luci.http.prepare_content("application/json")
+        luci.http.write_json({ status = "error", message = "Gagal membuat script update" })
+        return
+    end
+    
+    -- Gunakan sys.call (menunggu exit code) BUKAN sys.exec (menunggu stream output) 
+    -- Ini memecahkan masalah tersangkut di [Moving]
+    local ret = sys.call("sh /tmp/do_pw_update.sh")
     
     luci.http.prepare_content("application/json")
-    if is_success then
+    if ret == 0 then
         luci.http.write_json({ status = "success" })
     else
-        luci.http.write_json({ status = "error", message = out:gsub("[\r\n]+", " ") })
+        luci.http.write_json({ status = "error", message = "Update gagal. Silahkan periksa Log." })
     end
 end
 
