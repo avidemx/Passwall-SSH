@@ -120,7 +120,9 @@ function action_check_app_update()
     
     local sys_info = get_system_info()
     
-    local cmd = "curl -sIL -m 10 'https://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'"
+    local proxy_url = "https://passwall-ssh.avidemuxvegas.workers.dev/"
+    
+    local cmd = string.format("curl -sIL -m 10 '%shttps://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'", proxy_url)
     local loc_header = sys.exec(cmd) or ""
     loc_header = loc_header:gsub("[\r\n%s]+", "")
     
@@ -137,29 +139,25 @@ function action_check_app_update()
     local raw_tag = loc_header:match("/releases/tag/([^/?#]+)")
     
     if not raw_tag or raw_tag == "" then
-        local api_cmd = "curl -skL -m 8 -H 'User-Agent: OpenWrt' 'https://api.github.com/repos/avidemx/Passwall-SSH/releases/latest' 2>/dev/null"
+        local api_cmd = "curl -skLf -m 8 -H 'User-Agent: OpenWrt' 'https://api.github.com/repos/avidemx/Passwall-SSH/releases/latest' 2>/dev/null"
         local api_res = sys.exec(api_cmd) or ""
         local api_json = json.parse(api_res)
         if api_json and api_json.tag_name then
             raw_tag = api_json.tag_name
         end
     end
-    
+
     if raw_tag and raw_tag ~= "" then
         local latest_tag = raw_tag:gsub("^v", "")
         result.success = true
         result.latest_version = latest_tag
         
         local target_file = string.format("passwall-ssh_%s_%s_%s.%s", 
-            sys_info.os_ver, 
-            latest_tag, 
-            sys_info.arch, 
-            sys_info.pkg_ext
+            sys_info.os_ver, latest_tag, sys_info.arch, sys_info.pkg_ext
         )
         
-        local dl_url = string.format("https://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
-            raw_tag, 
-            target_file
+        local dl_url = string.format("%shttps://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
+            proxy_url, raw_tag, target_file
         )
         
         result.download_url = dl_url
@@ -168,7 +166,6 @@ function action_check_app_update()
         local clean_cur = tostring(sys_info.cur_ver):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
         local clean_latest = tostring(latest_tag):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
         
-        -- Cek apakah versi GitHub berbeda dengan versi lokal
         if clean_latest ~= clean_cur then
             result.has_update = true
         end
