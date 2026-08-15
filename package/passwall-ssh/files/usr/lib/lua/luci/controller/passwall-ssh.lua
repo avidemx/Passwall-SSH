@@ -170,7 +170,7 @@ function action_check_app_update()
             result.has_update = true
         end
     else
-        result.message = "Gagal mendeteksi rilis terbaru dari GitHub."
+        result.message = "Gagal mendeteksi rilis terbaru."
     end
     
     luci.http.prepare_content("application/json")
