@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=passwall-ssh
-PKG_VERSION:=4.2.0
+PKG_VERSION:=4.3.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=avidemx
@@ -42,6 +42,18 @@ define Package/passwall-ssh/install
 	chmod 0755 $(1)/etc/init.d/passwall-ssh 2>/dev/null || true
 	chmod 0755 $(1)/usr/bin/* 2>/dev/null || true
 	chmod 0755 $(1)/usr/share/passwall-ssh/*.sh 2>/dev/null || true
+endef
+
+define Package/passwall-ssh/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+
+/etc/init.d/stunnel stop >/dev/null 2>&1 || true
+/etc/init.d/dnsproxy stop >/dev/null 2>&1 || true
+/etc/init.d/stunnel disable >/dev/null 2>&1 || true
+/etc/init.d/dnsproxy disable >/dev/null 2>&1 || true
+
+exit 0
 endef
 
 define Package/passwall-ssh/prerm
