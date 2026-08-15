@@ -217,9 +217,10 @@ function action_do_app_update()
         echo "Menghentikan service lama..." >> "$LOG_FILE"
         if [ -x "/etc/init.d/passwall-ssh" ]; then
             /etc/init.d/passwall-ssh stop >/dev/null 2>&1
+            /etc/init.d/firewall restart >/dev/null 2>&1
         fi
         
-        sleep 3
+        sleep 6
                 
         # 4. Install Package
         echo "Mengekstrak dan Menginstal Package..." >> "$LOG_FILE"
