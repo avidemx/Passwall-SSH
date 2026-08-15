@@ -1,4 +1,4 @@
-name: Build Passwall-SSH TEST Multi-Arch
+name: Build Passwall-SSH Mipsel_24kc
 
 on:
   workflow_dispatch:
