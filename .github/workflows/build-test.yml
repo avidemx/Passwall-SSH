@@ -1,0 +1,212 @@
+name: Build Passwall-SSH TEST Multi-Arch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.read_version.outputs.version }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Read version from file
+      id: read_version
+      run: |
+        # Cari file VERSION atau Version tanpa mempermasalahkan huruf besar/kecil
+        VER_FILE=$(ls | grep -i "^version$" | head -n 1)
+
+        if [ -n "$VER_FILE" ]; then
+          VERSION=$(cat "$VER_FILE" | tr -d ' \r\n')
+        else
+          VERSION="4.2.0"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Target Test Build Version: $VERSION"
+
+  build:
+    needs: setup
+
+    name: Test Build OpenWrt ${{ matrix.owrt.major }} (${{ matrix.arch_item.arch }})
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      APP_VERSION: ${{ needs.setup.outputs.version }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        owrt:
+          - version: "24.10.8"
+            major: "24"
+            ext: "ipk"
+            url_prefix: "https://downloads.openwrt.org/releases/24.10.8/targets"
+
+          - version: "25.12.5"
+            major: "25"
+            ext: "apk"
+            url_prefix: "https://downloads.openwrt.org/releases/25.12.5/targets"
+
+        arch_item:
+          - target: "ramips"
+            subtarget: "mt7621"
+            arch: "mipsel_24kc"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential clang flex bison gawk gettext git \
+          libncurses-dev libssl-dev python3 rsync unzip wget zstd
+
+    - name: Sync App Version to Repository Makefile
+      run: |
+        echo "Building TEST Passwall-SSH with version: $APP_VERSION"
+
+        if [ -f package/passwall-ssh/Makefile ]; then
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+          echo "Updated package/passwall-ssh/Makefile to $APP_VERSION"
+        fi
+
+    - name: Download OpenWrt SDK
+      run: |
+        SDK_BASE="${{ matrix.owrt.url_prefix }}/${{ matrix.arch_item.target }}/${{ matrix.arch_item.subtarget }}/"
+
+        SDK_FILE=$(wget -qO- "$SDK_BASE" \
+          | grep -o 'openwrt-sdk[^"]*Linux-x86_64.tar.zst' \
+          | head -n1)
+
+        if [ -z "$SDK_FILE" ]; then
+          echo "Error: OpenWrt SDK tidak ditemukan!"
+          exit 1
+        fi
+
+        wget "${SDK_BASE}${SDK_FILE}"
+
+    - name: Extract SDK
+      run: |
+        tar --zstd -xf openwrt-sdk-*.tar.zst
+
+        SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*")
+
+        if [ -z "$SDK_DIR" ]; then
+          echo "Error: SDK directory tidak ditemukan!"
+          exit 1
+        fi
+
+        mv "$SDK_DIR" sdk
+
+    - name: Restore dl cache
+      uses: actions/cache@v4
+      with:
+        path: sdk/dl
+        key: dl-${{ matrix.owrt.major }}-${{ matrix.arch_item.arch }}
+
+    - name: Copy packages to SDK
+      run: |
+        cp -a package/badvpn sdk/package/
+        cp -a package/passwall-ssh sdk/package/
+
+    - name: Configure SDK & Set Version
+      working-directory: sdk
+      run: |
+        # Update versi langsung di dalam SDK
+        sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
+        sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/passwall-ssh/Makefile
+
+        echo "CONFIG_PACKAGE_badvpn-tun2socks=y" >> .config
+        echo "CONFIG_PACKAGE_passwall-ssh=y" >> .config
+
+        make defconfig
+
+    - name: 1. Compile BadVPN
+      working-directory: sdk
+      run: |
+        make package/badvpn/{clean,compile} -j$(nproc) V=s
+
+    - name: 2. Inject BadVPN into Passwall-SSH
+      working-directory: sdk
+      run: |
+        BIN_PATH=$(find build_dir/ \
+          -path "*/usr/bin/badvpn-tun2socks" \
+          -type f \
+          | head -n1)
+
+        if [ -z "$BIN_PATH" ]; then
+          BIN_PATH=$(find build_dir/ \
+            -name "badvpn-tun2socks" \
+            -type f \
+            | grep -v "/CMakeFiles/" \
+            | head -n1)
+        fi
+
+        if [ -z "$BIN_PATH" ]; then
+          echo "Error: badvpn-tun2socks binary not found!"
+          exit 1
+        fi
+
+        mkdir -p package/passwall-ssh/files/usr/bin/
+        mkdir -p package/passwall-ssh/files/usr/share/passwall-ssh/
+
+        cp "$BIN_PATH" \
+          package/passwall-ssh/files/usr/bin/badvpn-tun2socks
+
+        chmod +x \
+          package/passwall-ssh/files/usr/bin/badvpn-tun2socks
+
+        # Tulis versi bersih ke file share router
+        echo "$APP_VERSION" \
+          > package/passwall-ssh/files/usr/share/passwall-ssh/version
+
+    - name: 3. Compile Passwall-SSH
+      working-directory: sdk
+      run: |
+        make package/passwall-ssh/{clean,compile} -j$(nproc) V=s
+
+    - name: Prepare Test Artifact
+      run: |
+        mkdir -p release
+
+        PKG=$(find sdk/bin/packages/ \
+          -name "passwall-ssh*.${{ matrix.owrt.ext }}" \
+          2>/dev/null \
+          | head -n1)
+
+        if [ -z "$PKG" ]; then
+          PKG=$(find sdk/bin/ \
+            -name "passwall-ssh*.${{ matrix.owrt.ext }}" \
+            | head -n1)
+        fi
+
+        if [ -z "$PKG" ]; then
+          echo "Error: file passwall-ssh*.${{ matrix.owrt.ext }} tidak ditemukan!"
+          exit 1
+        fi
+
+        CUSTOM_NAME="passwall-ssh_${{ matrix.owrt.major }}_${APP_VERSION}_${{ matrix.arch_item.arch }}.${{ matrix.owrt.ext }}"
+
+        cp "$PKG" "release/$CUSTOM_NAME"
+
+        echo "Generated TEST package: $CUSTOM_NAME"
+        ls -lh release/
+
+    - name: Upload TEST Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: passwall-test-${{ matrix.owrt.major }}-${{ matrix.arch_item.arch }}
+        path: release/*
+        if-no-files-found: error
