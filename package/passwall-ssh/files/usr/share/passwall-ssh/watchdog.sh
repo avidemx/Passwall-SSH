@@ -199,7 +199,7 @@ while true; do
 
     if [ -f /tmp/etc/passwall-ssh.need_restart ]; then
         rm -f /tmp/etc/passwall-ssh.need_restart
-        trigger_restart "Watchdog menerima sinyal (Restarting Service...)"
+        trigger_restart "Restarting Service..."
     fi
 
     if [ $((LOOP_COUNTER % 150)) -eq 0 ]; then
