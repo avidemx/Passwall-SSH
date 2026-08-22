@@ -111,6 +111,12 @@ wait_port() {
     local i=0
     
     while ! netstat -tln 2>/dev/null | grep -q ":$PORT "; do
+
+        if [ -f /tmp/etc/passwall-ssh.need_restart ]; then
+            rm -f /tmp/etc/passwall-ssh.need_restart
+            trigger_restart "Restarting Service..."
+        fi
+    
         if [ -f /tmp/etc/passwall-ssh.auth_failed ]; then
             local SRV_LOG=$(head -n 1 /tmp/etc/passwall-ssh.auth_failed 2>/dev/null)
             [ -n "$SRV_LOG" ] && log "[SERVER LOG] $SRV_LOG"
