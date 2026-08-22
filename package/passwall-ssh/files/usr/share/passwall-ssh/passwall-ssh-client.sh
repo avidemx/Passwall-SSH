@@ -29,11 +29,6 @@ rm -f /tmp/etc/passwall-ssh.kex_failed
 rm -f /tmp/etc/passwall-ssh.stop_loop
 rm -f /tmp/etc/passwall-ssh.need_restart
 
-FAIL_FILE="/tmp/etc/passwall-ssh.fail_count"
-RECONNECT_FILE="/tmp/etc/passwall-ssh.is_reconnect"
-echo "0" > "$FAIL_FILE"
-echo "0" > "$RECONNECT_FILE"
-
 export SSHPASS="$PASSWORD"
 
 # LOOP UTAMA SSH
@@ -69,6 +64,16 @@ while true; do
         fi
 
         case "$line" in
+        *"HTTP/1.1 101 Switching Protocols"*)
+            IS_BANNER=0
+            echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] HTTP/1.1 101 Switching Protocols</span>" >> "$LOG"
+            continue
+            ;;
+        *"debug1:"*|*"debug2:"*|*"debug3:"*)
+            IS_BANNER=0
+            continue
+            ;;
+
         *"Reading configuration data"*|\
         *"Executing proxy command"*|\
         *"identity file "*|\
@@ -114,25 +119,16 @@ while true; do
         *"Connection timed out"*|\
         *"Connection refused"*|\
         *"ssh_exchange_identification:"*|\
-        *"kex_exchange_identification: Connection closed"*|\
+        *"kex_exchange_identification: Connection"*|\
+        *"kex_exchange_identification: read"*|\
         *"client_loop:"*|\
         *"packet_write_wait:"*|\
         *"mux_client_request_session:"*|\
         *"Timeout, server "*)
             IS_BANNER=0
-            FAILS=$(cat "$FAIL_FILE" 2>/dev/null || echo "0")
-            FAILS=$((FAILS + 1))
-            echo "$FAILS" > "$FAIL_FILE"
-            
-            if [ "$FAILS" -ge 3 ]; then
-                echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] SSH Failed Connected (3x). Restart!</span>" >> "$LOG"
-                touch /tmp/etc/passwall-ssh.need_restart
-                break
-            else
-                echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] Connection dropped:</span> $line" >> "$LOG"
-                echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] SSH Disconnected ($FAILS/3). Retrying...</span>" >> "$LOG"
-                continue
-            fi
+            echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] $line</font>" >> "$LOG"
+            touch /tmp/etc/passwall-ssh.need_restart
+            break
             ;;
 
         *"Local version string SSH-2.0-"*)
@@ -187,25 +183,6 @@ while true; do
         *"Local forwarding listening on 127.0.0.1 port 1080."*)
             IS_BANNER=0
             echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] SOCKS5 Listening : 127.0.0.1:1080</span>" >> "$LOG"
-            continue
-            ;;
-
-        *"Entering interactive session."*)
-            IS_BANNER=0
-            echo "0" > "$FAIL_FILE" # Reset error karena berhasil
-            
-            IS_REC=$(cat "$RECONNECT_FILE" 2>/dev/null || echo "0")
-            if [ "$IS_REC" -eq 0 ]; then
-                echo "1" > "$RECONNECT_FILE"
-            else
-                echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] Tunnel Connected</span>" >> "$LOG"
-                echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] Service Started</span>" >> "$LOG"
-            fi
-            continue
-            ;;
-
-        *"debug1:"*|*"debug2:"*|*"debug3:"*)
-            IS_BANNER=0
             continue
             ;;
 
