@@ -2,8 +2,8 @@
 config sshtls 'main'
 	option enabled '0'
 	option selected_profile 'ilped_VPN'
-	option dns_proto 'DoH'
-	option dns_url 'cloudflare-dns.com/dns-query'
+	option dns_proto 'TCP'
+	option dns_ip '1.1.1.1'
 
 config profile 'ilped_VPN'
 	option host 'xxxx.cloudfront.net'
