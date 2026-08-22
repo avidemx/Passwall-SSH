@@ -69,6 +69,7 @@ while true; do
             echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] HTTP/1.1 101 Switching Protocols</span>" >> "$LOG"
             continue
             ;;
+            
         *"debug1:"*|*"debug2:"*|*"debug3:"*)
             IS_BANNER=0
             continue
@@ -119,8 +120,7 @@ while true; do
         *"Connection timed out"*|\
         *"Connection refused"*|\
         *"ssh_exchange_identification:"*|\
-        *"kex_exchange_identification: Connection"*|\
-        *"kex_exchange_identification: read"*|\
+        *"kex_exchange_identification: Connection closed"*|\
         *"client_loop:"*|\
         *"packet_write_wait:"*|\
         *"mux_client_request_session:"*|\
