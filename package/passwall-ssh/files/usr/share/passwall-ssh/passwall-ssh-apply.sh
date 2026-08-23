@@ -2,7 +2,6 @@
 
 LOG_FILE="/tmp/etc/passwall-ssh.log"
 
-# 1. Ambil nama profile yang sedang dipilih dari dropdown
 SELECTED=$(uci -q get passwall-ssh.main.selected_profile)
 
 if [ -z "$SELECTED" ]; then
@@ -10,7 +9,6 @@ if [ -z "$SELECTED" ]; then
     exit 1
 fi
 
-# 2. Ambil data spesifik berdasarkan Profile yang dipilih
 HOST=$(uci -q get passwall-ssh.$SELECTED.host)
 HOST_PORT=$(uci -q get passwall-ssh.$SELECTED.host_port)
 USERNAME=$(uci -q get passwall-ssh.$SELECTED.username)
@@ -23,7 +21,6 @@ SNI=$(uci -q get passwall-ssh.$SELECTED.sni)
 UDPGW_PORT=$(uci -q get passwall-ssh.$SELECTED.udpgw_port)
 PAYLOAD_RAW=$(uci -q get passwall-ssh.$SELECTED.payload)
 
-# Fallback nilai default jika kosong (PROXY_PORT dihapus dari sini)
 [ -z "$UDPGW_PORT" ] && UDPGW_PORT="7200"
 
 ### TRANSLASI PAYLOAD ###
@@ -31,20 +28,15 @@ PAYLOAD_PY=$(printf '%s' "$PAYLOAD_RAW" \
     | sed "s/\[host\]/$HOST/g" \
     | sed 's|\[ua\]|Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/45.0.2454.85 Safari/537.36|g')
 
-# Logika Fallback Pintar berdasarkan kombinasi Netmod
 if [ "$PROXY_TYPE" = "HTTP" ]; then
-    # Jika pakai Proxy, pastikan variabel terisi
     [ -z "$PROXY_PORT" ] && PROXY_PORT="80"
     STUNNEL_CONNECT="$PROXY:$PROXY_PORT"
 else
-    # Jika Proxy = None, maka langsung konek ke HOST (atau SNI)
     STUNNEL_CONNECT="$HOST:443"
-    # Kosongkan variabel proxy agar http.lua tahu ini koneksi langsung
     PROXY=""
     PROXY_PORT=""
 fi
 
-# 3. Tulis ke stunnel.conf HANYA JIKA TLS AKTIF
 if [ "$TLS_TYPE" = "TLS" ]; then
     cat > /usr/share/passwall-ssh/stunnel.conf <<EOF
 setuid = nobody
@@ -65,12 +57,10 @@ else
     TRANSPORT="TCP"
 fi
 
-# 4. Tulis ke payload
 printf '%s' "$PAYLOAD_PY" |
 sed 's/\[crlf\]/\
 /g' >/usr/share/passwall-ssh/passwall-ssh.payload
 
-# --- LOGIKA SMARTDNS ---
 DNS_PROTO=$(uci -q get passwall-ssh.main.dns_proto)
 [ -z "$DNS_PROTO" ] && DNS_PROTO="UDP"
 
@@ -82,7 +72,6 @@ else
     [ "$DNS_SERVER" = "manual" ] && DNS_SERVER=$(uci -q get passwall-ssh.main.dns_manual)
 fi
 
-# 5. Injeksi variabel ke env
 cat >/usr/share/passwall-ssh/passwall-ssh.env <<EOF
 PROFILE_NAME='$SELECTED'
 TRANSPORT='$TRANSPORT'
