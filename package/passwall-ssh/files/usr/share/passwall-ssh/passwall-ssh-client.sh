@@ -68,11 +68,6 @@ while true; do
             echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] HTTP/1.1 101 Switching Protocols</span>" >> "$LOG"
             continue
             ;;
-            
-        *"debug1:"*|*"debug2:"*|*"debug3:"*)
-            IS_BANNER=0
-            continue
-            ;;
 
         *"Reading configuration data"*|\
         *"Executing proxy command"*|\
@@ -184,7 +179,12 @@ while true; do
             echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] SOCKS5 Listening : 127.0.0.1:1080</span>" >> "$LOG"
             continue
             ;;
-
+            
+        *"debug1:"*|*"debug2:"*|*"debug3:"*)
+            IS_BANNER=0
+            continue
+            ;;
+            
         *)
             CLEAN_LINE="$SAFE_LINE"
             while true; do
