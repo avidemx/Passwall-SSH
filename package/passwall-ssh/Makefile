@@ -35,10 +35,8 @@ define Package/passwall-ssh/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/passwall-ssh
 	$(INSTALL_DIR) $(1)/usr/share/passwall-ssh
 	
-	# Salin semua file dari folder 'files'
 	$(CP) ./files/* $(1)/
 	
-	# Berikan izin eksekusi
 	chmod 0755 $(1)/etc/init.d/passwall-ssh 2>/dev/null || true
 	chmod 0755 $(1)/usr/bin/* 2>/dev/null || true
 	chmod 0755 $(1)/usr/share/passwall-ssh/*.sh 2>/dev/null || true
