@@ -16,7 +16,6 @@ log() {
     echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] $*</span>" >> "$LOG"
 }
 
-# --- PERBAIKAN: Fungsi fatal sekarang benar-benar melakukan pembersihan ---
 fatal() {
     log "FATAL: $1"
     log "Memicu proses rollback..."
@@ -88,7 +87,6 @@ start_tun2socks() {
 setup_nft() {
     nft delete table inet "$NFT_TABLE" 2>/dev/null
     
-    # --- PERBAIKAN: Merakit rule NFT secara dinamis tanpa syntax error ---
     local RULES="add table inet $NFT_TABLE
     add chain inet $NFT_TABLE prerouting { type filter hook prerouting priority mangle; }
     add chain inet $NFT_TABLE output { type route hook output priority mangle; }"
@@ -122,7 +120,6 @@ setup_nft() {
 
     echo "$RULES" | nft -f - || fatal "Gagal menerapkan rule nftables"
 
-    # --- FIX: BYPASS FORWARD OPENWRT & MSS CLAMPING ---
     nft add chain inet fw4 passwall_fwd 2>/dev/null
     nft flush chain inet fw4 passwall_fwd 2>/dev/null
     
