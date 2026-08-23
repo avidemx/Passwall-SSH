@@ -50,7 +50,7 @@ header_ui.cfgvalue = function()
     
     /* ===== TAB CONTAINER ===== */
     .cbi-tabmenu { display: flex; color: inherit !important; gap: 3px; }
-    .cbi-tabmenu > li { color: inherit !important; margin: 0; padding: 0; }
+    .cbi-tabmenu > li { color: inherit !important; margin: 0; padding: 0; position: relative; }
     .cbi-tabmenu > li > a {
         display: block; padding: 8px 16px; line-height: 18px; color: inherit !important; text-decoration: none;
         background: rgba(128,128,128,.06); border: 1px solid rgba(128,128,128,.25); border-bottom-color: rgba(128,128,128,.25);
@@ -61,6 +61,19 @@ header_ui.cfgvalue = function()
         color: #00AEFF !important; background: transparent; border-color: rgba(128,128,128,.25); border-top:2px solid #00AEFF;
         padding-top:7px; margin-bottom: -1px; box-shadow: 0 -1px 3px rgba(0,0,0,.05); font-weight: 600;
     } 
+
+    /* NOTIFIKASI MERAH UPDATE */
+    .tab-notif::after {
+        content: '';
+        position: absolute;
+        top: 4px;
+        right: 6px;
+        width: 8px;
+        height: 8px;
+        background-color: #ff4c4c;
+        border-radius: 50%;
+        box-shadow: 0 0 5px rgba(255, 76, 76, 0.8);
+    }
    
     .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; }
     .profile-text .p-name { font-weight: bold; color: inherit; margin-right: 5px; opacity: 1; }
@@ -121,8 +134,6 @@ header_ui.cfgvalue = function()
         font-size: 13px;
         transition: 0.2s;
     }
-    .btn-check { background: #00AEFF; color: #fff; }
-    .btn-check:hover { background: #008ecc; }
     .btn-apply { background: #28a745; color: #fff; }
     .btn-apply:hover { background: #218838; }
     .btn-disabled { background: rgba(128,128,128,0.3) !important; color: #999 !important; cursor: not-allowed !important; }
@@ -158,7 +169,7 @@ header_ui.cfgvalue = function()
             </div>
             <div class="pw-box clickable" onclick="touchCheck('https://www.github.com', 'status-github')">
                 <div class="pw-icon">
-                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIj48cGF0aCBkPSJNMTIgMkM2LjQ3NyAyIDIgNi40NzcgMiAxMmMwIDQuNDIgMi44NjUgOC4xNjYgNi44MzkgOS40ODkuNS4wOTIuNjgyLS4yMTcuNjgyLS40ODIgMC0uMjM3LS4wMDgtLjg2Ni0uMDEzLTEuNy0yLjc4Mi42MDMtMy4zNjktMS4zNC0zLjM2OS0xLjM0LS40NTQtMS4xNTYtMS4xMS0xLjQ2Mi0xLjExLTEuNDYyLS45MDgtLjYyLjA2OS0uNjA4LjA2OS0uNjA4IDEuMDAzLjA3IDEuNTMxIDEuMDMgMS41MzEgMS4wMy44OTIgMS41MjkgMi4zNDEgMS4wODcgMi45MS44MzEuMDkyLS42NDYuMzUtMS4wODYuNjM2LTEuMzM2LTIuMjItLjI1My00LjU1NS0xLjExLTQuNTU1LTQuOTQzIDAtMS4wOTEuMzktMS45ODQgMS4wMjktMi42ODMtLjEwMy0uMjUzLS40NDYtMS4yNy4wOTgtMi42NDcgMCAwIC44NC0uMjY5IDIuNzUgMS4wMjVBOS41NzggOS41NzggMCAwMTEyIDYuODM2Yy44NS4wMDQgMS43MDUuMTE0IDIuNTA0LjMzNiAxLjkwOS0xLjI5NCAyLjc0Ny0xLjAyNSAyLjc0Ny0xLjAyNS41NDYgMS4zNzcuMjAzIDIuMzk0LjEgMi42NDcuNjQuNjk5IDEuMDI4IDEuNTkyIDEuMDI4IDIuNjgzIDAgMy44NDItMi4zMzkgNC42ODctNC41NjYgNC45MzUuMzU5LjMwOS42NzguOTE5LjY3OCAxLjg1MiAwIDEuMzM2LS4wMTIgMjAuNDE1LS4wMTIgMjAuNzQzIDAgLjI2Ny4xOC41NzguNjg4LjQ4QzE5LjEzOCAyMC4xNjEgMjIgMTYuNDE2IDIyIDEyYzAtNS41MjMtNC40NzctMTAtMTAtMTB6Ii8+PC9zdmc+">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIj48cGF0aCBkPSJNMTIgMkM2LjQ3NyAyIDIgNi40NzcgMiAxMmMwIDQuNDIgMi44NjUgOC4xNjYgNi44MzkgOS40ODkuNS4wOTIuNjgyLS4yMTcuNjgyLS40ODIgMC0uMjM3LS4wMDgtLjg2Ni0uMDEzLTEuNy0yLjc4Mi42MDMtMy4zNjktMS4zNC0zLjM2OS0xLjM0LS40NTQtMS4xNTYtMS4xMS0xLjQ2Mi0xLjExLTEuNDYyLS45MDgtLjYyLjA2OS0uNjA4LjA2OS0uNjA4IDEuMDAzLjA3IDEuNTMxIDEuMDMgMS41MzEgMS4wMy44OTIgMS41MjkgMi4zNDEgMS4wODcgMi45MS44MzEuMDkyLS42NDYuMzUtMS4wODYuNjM2LTEuMzM2LTIuMjItLjI1My00LjU1NS0xLjExLTQuNTU1LTQuOTQzIDAtMS4wOTEuMzktMS45ODQgMS4wMjktMi42ODMtLjEwMy0uMjUzLS40NDYtMS4yNy4wOTgtMi42NDcgMCAwIC44NC0uMjY5IDIuNzUgMS4wMjVBOS41NzggOS41NzggMCAwMTEyIDYuODM2Yy44NS4wMDQgMS43MDUuMTE0IDIuNTA0LjMzNiAxLjkwOS0xLjI5NCAyLjc0Ny0xLjAyNSAyLjc0Ny0xLjAyNS41NDYgMS4zNzcuMjAzIDIuMzk0LjEuMjY0Ny42NC42OTkgMS4wMjggMS41OTIgMS4wMjggMi42ODMgMCAzLjg0Mi0yLjMzOSA0LjY4Ny00LjU2NiA0LjkzNS4zNTkuMzA5LjY3OC45MTkuNjc4IDEuODUyIDAgMS4zMzYtLjAxMiAyMC40MTUtLjAxMiAyMC43NDMgMCAuMjY3LjE4LjU3OC42ODguNDhDMTkuMTM4IDIwLjE2MSAyMiAxNi40MTYgMjIgMTJjMC01LjUyMy00LjQ3Ny0xMC0xMC0xMHoiLz48L3N2Zz4=">
                 </div>
                 <div class="pw-info"><span class="pw-title">Github</span><span class="pw-val" id="status-github" style="color:#5bc0de;">Touch to Check</span></div>
             </div>
@@ -238,11 +249,12 @@ header_ui.cfgvalue = function()
                     <div class="update-label">Passwall-SSH Version :</div>
                     <div class="update-value" id="upd-cur-ver">Detecting...</div>
                 </div>
-                <div style="margin-top: 5px;">
-                    <button type="button" id="btn-app-update" class="btn-update btn-check" onclick="handleAppUpdate()">Check Update</button>
-                </div>
                 
                 <div id="update-check-result" style="display: none; font-size: 14px; font-weight: bold; margin-top: 5px;"></div>
+                
+                <div style="margin-top: 5px;">
+                    <button type="button" id="btn-app-update" class="btn-update btn-apply" style="display: none;" onclick="handleAppUpdate()">Click to update</button>
+                </div>
             </div>
         </div>
 
@@ -259,7 +271,7 @@ header_ui.cfgvalue = function()
         const loadingGlobeURI = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQwIiBzdHJva2U9IiM4ODgiIHN0cm9rZS13aWR0aD0iOCIgZmlsbD0ibm9uZSIgb3BhY2l0eT0iMC4zIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iNDAiIHN0cm9rZT0iIzAwQUVGRiIgc3Ryb2tlLXdpZHRoPSI4IiBmaWxsPSJub25lIiBzdHJva2UtZGFzaGFycmF5PSI3MCAyMDAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==";
         const CHECK_IP_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_ip") .. [=[';
         const GET_APP_INFO_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "get_app_info") .. [=[';
-        const CHECK_APP_UPDATE_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_app_update") .. [=[';
+        const GET_UPDATE_STATUS_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "get_update_status") .. [=[';
         const DO_APP_UPDATE_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "do_app_update") .. [=[';
         
         window.isFetchingIP = false;
@@ -381,6 +393,26 @@ header_ui.cfgvalue = function()
                 });
         }
 
+        function checkUpdateStatus() {
+            fetch(GET_UPDATE_STATUS_URL)
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (res.has_update) {
+                        document.getElementById('tab_update').classList.add('tab-notif');
+                        var btn = document.getElementById('btn-app-update');
+                        var resBox = document.getElementById('update-check-result');
+                        
+                        btn.style.display = "inline-block";
+                        resBox.style.display = "block";
+                        resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + ' is available!</span>';
+                        
+                        latestDownloadUrl = res.download_url;
+                        updateReady = true;
+                    }
+                })
+                .catch(function(e) { console.log("Failed to load update status"); });
+        }
+
         function switchTab(tabName) {
             sessionStorage.setItem('passwall_active_tab', tabName);
             ['main', 'dns', 'config', 'update', 'log'].forEach(function(t) {
@@ -418,102 +450,56 @@ header_ui.cfgvalue = function()
         }
 
         window.handleAppUpdate = function() {
+            if (!updateReady) return;
             var btn = document.getElementById('btn-app-update');
-            var resBox = document.getElementById('update-check-result');
             
-            if (!updateReady) {
-                // Proses Cek Update
-                btn.classList.add('btn-disabled');
-                btn.disabled = true;
-                btn.innerText = "Checking...";
-                resBox.style.display = "none";
+            btn.classList.add('btn-disabled');
+            btn.disabled = true;
 
-                fetch(CHECK_APP_UPDATE_URL)
-                    .then(function(r) { return r.json(); })
-                    .then(function(res) {
-                        btn.classList.remove('btn-disabled');
-                        btn.disabled = false;
-                        resBox.style.display = "block";
+            btn.innerText = "[Downloading]";
+            setTimeout(function() {
+                if (btn.innerText === "[Downloading]") btn.innerText = "[Unpacking]";
+            }, 3000);
+            setTimeout(function() {
+                if (btn.innerText === "[Unpacking]") btn.innerText = "[Moving]";
+            }, 6000);
 
-                        if (!res.success) {
-                            resBox.innerHTML = '<span style="color:#ff4c4c;">Failed to check update.</span>';
-                            btn.innerText = "Check Update";
-                            return;
-                        }
+            var formData = new FormData();
+            formData.append("url", latestDownloadUrl);
 
-                        if (res.has_update) {
-                            latestDownloadUrl = res.download_url;
-                            resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + '</span>';
-                            btn.innerText = "Click to update";
-                            btn.classList.remove('btn-check');
-                            btn.classList.add('btn-apply');
-                            updateReady = true;
-                        } else {
-                            resBox.innerHTML = '<span style="color:#06BA06;">Latest Version ' + res.latest_version + ', your app up to date.</span>';
-                            btn.innerText = "Check Update";
-                        }
-                    })
-                    .catch(function() {
-                        btn.classList.remove('btn-disabled');
-                        btn.disabled = false;
-                        btn.innerText = "Check Update";
-                        resBox.style.display = "block";
-                        resBox.innerHTML = '<span style="color:#ff4c4c;">Connection error during update check.</span>';
-                    });
-            } else {
-                // Proses Eksekusi Update
-                btn.classList.add('btn-disabled');
-                btn.disabled = true;
-
-                btn.innerText = "[Downloading]";
-                setTimeout(function() {
-                    if (btn.innerText === "[Downloading]") btn.innerText = "[Unpacking]";
-                }, 3000);
-                setTimeout(function() {
-                    if (btn.innerText === "[Unpacking]") btn.innerText = "[Moving]";
-                }, 6000);
-
-                var formData = new FormData();
-                formData.append("url", latestDownloadUrl);
-
-                fetch(DO_APP_UPDATE_URL, {
-                    method: "POST",
-                    body: formData
-                })
-                .then(function(r) { return r.json(); })
-                .then(function(res) {
-                    if (res.status === "success") {
-                        btn.innerText = "[Update Successfull]";
-                        btn.style.background = "#28a745";
-                        setTimeout(function() {
-                            location.reload();
-                        }, 2000);
-                    } else {
-                        btn.innerText = "Update Failed!";
-                        btn.style.background = "#dc3545";
-                        setTimeout(function() {
-                            btn.style.background = "";
-                            btn.classList.remove('btn-disabled', 'btn-apply');
-                            btn.classList.add('btn-check');
-                            btn.disabled = false;
-                            updateReady = false;
-                            btn.innerText = "Check Update";
-                        }, 3000);
-                    }
-                })
-                .catch(function(e) {
-                    btn.innerText = "Error!";
+            fetch(DO_APP_UPDATE_URL, {
+                method: "POST",
+                body: formData
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.status === "success") {
+                    btn.innerText = "[Update Successfull]";
+                    btn.style.background = "#28a745";
+                    setTimeout(function() {
+                        location.reload();
+                    }, 2000);
+                } else {
+                    btn.innerText = "Update Failed!";
                     btn.style.background = "#dc3545";
                     setTimeout(function() {
                         btn.style.background = "";
-                        btn.classList.remove('btn-disabled', 'btn-apply');
-                        btn.classList.add('btn-check');
+                        btn.classList.remove('btn-disabled');
                         btn.disabled = false;
-                        updateReady = false;
-                        btn.innerText = "Check Update";
+                        btn.innerText = "Click to update";
                     }, 3000);
-                });
-            }
+                }
+            })
+            .catch(function(e) {
+                btn.innerText = "Error!";
+                btn.style.background = "#dc3545";
+                setTimeout(function() {
+                    btn.style.background = "";
+                    btn.classList.remove('btn-disabled');
+                    btn.disabled = false;
+                    btn.innerText = "Click to update";
+                }, 3000);
+            });
         };
 
         function touchCheck(host, elId) {
@@ -644,6 +630,7 @@ header_ui.cfgvalue = function()
             switchTab(sessionStorage.getItem('passwall_active_tab') || 'main');
             window.forceCheckIP();
             startConnTimer();
+            checkUpdateStatus(); // Mengecek secara diam-diam saat load
         });
 
         setInterval(checkServicesLoop, 3000);
