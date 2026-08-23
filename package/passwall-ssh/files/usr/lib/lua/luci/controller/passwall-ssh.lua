@@ -8,8 +8,6 @@ function index()
     entry({"admin", "services", "passwall-ssh", "check_services"}, call("action_check_services"))
     entry({"admin", "services", "passwall-ssh", "get_log"}, call("action_get_log"))
     entry({"admin", "services", "passwall-ssh", "clear_log"}, call("action_clear_log"))
-    
-    -- API Route untuk App Update
     entry({"admin", "services", "passwall-ssh", "get_app_info"}, call("action_get_app_info")).leaf = true
     entry({"admin", "services", "passwall-ssh", "check_app_update"}, call("action_check_app_update")).leaf = true
     entry({"admin", "services", "passwall-ssh", "do_app_update"}, call("action_do_app_update")).leaf = true
@@ -40,10 +38,9 @@ local function get_system_info()
     local sys = require "luci.sys"
     local os_rel = sys.exec("cat /etc/os-release 2>/dev/null") or ""
     local owrt_rel = sys.exec("cat /etc/openwrt_release 2>/dev/null") or ""
-    
-    -- 1. Deteksi Versi OS
+
     local os_ver = os_rel:match('VERSION_ID="([%d]+)') or ""
-    local fw_ver = os_rel:match('VERSION_ID="([^"]+)"') or "Unknown" -- Ambil full version untuk frontend
+    local fw_ver = os_rel:match('VERSION_ID="([^"]+)"') or "Unknown"
     local has_apk = (sys.call("command -v apk >/dev/null 2>&1") == 0)
     
     if os_ver == "" then
@@ -53,7 +50,6 @@ local function get_system_info()
     local is_apk = (os_ver == "25") or has_apk
     local pkg_ext = is_apk and "apk" or "ipk"
     
-    -- 2. Deteksi Arsitektur Lengkap (Prioritas: /etc/openwrt_release -> opkg -> apk -> uname)
     local arch = owrt_rel:match("DISTRIB_ARCH=['\"]?([^'\"%s\n]+)") or ""
     
     if arch == "" then
@@ -68,10 +64,8 @@ local function get_system_info()
         arch = sys.exec("uname -m 2>/dev/null"):gsub("%s+", "")
     end
 
-    -- Normalisasi umum
     if arch == "x86-64" then arch = "x86_64" end
 
-    -- 3. Deteksi Versi Aplikasi Terinstal
     local cur_ver = ""
     if type(read_file) == "function" then
         cur_ver = read_file("/usr/share/passwall-ssh/version") or ""
@@ -89,7 +83,6 @@ local function get_system_info()
         end
     end
 
-    -- Normalisasi string versi
     cur_ver = cur_ver:gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
     if cur_ver == "" then cur_ver = "Unknown" end
 
@@ -237,7 +230,7 @@ function action_do_app_update()
         if [ $INSTALL_STATUS -ne 0 ]; then
             # Cek apakah apk error tapi file sebenarnya sukses terekstrak
             if grep -q "Installing file to" "$LOG_FILE"; then
-                echo "Warning: Error pada script post-upgrade apk (127). Diabaikan karena file fisik sukses terinstal." >> "$LOG_FILE"
+                echo "Warning: Error pada script post-upgrade apk (127). Diabaikan karena file sukses terinstal." >> "$LOG_FILE"
                 INSTALL_STATUS=0
             else
                 echo "ERROR: Install gagal dengan kode $INSTALL_STATUS" >> "$LOG_FILE"
@@ -268,7 +261,6 @@ function action_do_app_update()
         exit 0
     ]], dl_url, ext)
     
-    -- Tulis script ke file sementara
     local f = io.open("/tmp/do_pw_update.sh", "w")
     if f then
         f:write(sh_script)
@@ -279,8 +271,6 @@ function action_do_app_update()
         return
     end
     
-    -- Gunakan sys.call (menunggu exit code) BUKAN sys.exec (menunggu stream output) 
-    -- Ini memecahkan masalah tersangkut di [Moving]
     local ret = sys.call("sh /tmp/do_pw_update.sh")
     
     luci.http.prepare_content("application/json")
