@@ -67,8 +67,8 @@ trigger_restart() {
         
         if [ "$RETRY_COUNT" -ge 30 ]; then
             log "$REASON"
-            log "Max restart limit (30x) reached. Force stopping service."
-            # Hapus file agar jika di-start manual nanti, kembali ke 0
+            echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: Service has been forcefully stopped to prevent excessive CPU and RAM usage.</font>" >> "$LOG"
+            echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] Please check your network connection, upstream connectivity, server availability, and VPN/SSH configuration before restarting the service.</font>" >> "$LOG"
             rm -f "$RETRY_FILE"
             trigger_stop
         fi
@@ -79,7 +79,6 @@ trigger_restart() {
         log "$REASON"
         log "Preparing Restart (Attempt $RETRY_COUNT/30)"
 
-        # BENDERA: Beritahu init.d bahwa ini adalah ulah Watchdog, jangan reset hitungan!
         touch /tmp/etc/passwall-ssh.is_retry
         /etc/init.d/passwall-ssh restart &
     else
@@ -151,20 +150,16 @@ INITIAL_UPSTREAM_IF=$(get_upstream_if)
 
 check_ipv6
 
-# 1. Tunggu pintu proxy lokal (Stunnel & Lua) terbuka DULU
 if [ "$TRANSPORT" = "TLS" ]; then
     wait_port 4444 15
 fi
 wait_port 8080 15
 
-# 2. Setelah pintu lokal dipastikan terbuka, barulah lepaskan SSH (Client)
 sh /usr/share/passwall-ssh/passwall-ssh-client.sh &
 echo $! > /var/run/passwall-ssh-client.pid
 
-# 3. Tunggu hingga SSH berhasil membuka SOCKS5
 wait_port 1080 30
 
-# 4. Semuanya siap, terapkan rute VPN
 /usr/share/passwall-ssh/passwall-ssh.sh start &
 
 # ==========================================
