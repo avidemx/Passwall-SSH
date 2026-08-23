@@ -2,7 +2,6 @@ local dsp = require "luci.dispatcher"
 local http = require "luci.http"
 local sys = require "luci.sys"
 
--- arg[1] adalah nama dari config (misalnya: ilped_cf)
 local config_name = arg[1] or ""
 
 m = Map("passwall-ssh", "EDIT PROFILE", "Detail Konfigurasi untuk Profil: <b>" .. config_name .. "</b>")
@@ -22,7 +21,6 @@ function name.cfgvalue(self, section)
     return section
 end
 function name.write(self, section, value)
-    -- Dibiarkan kosong, karena rename dieksekusi di on_after_commit
 end
 
 -- ==========================================
@@ -39,23 +37,19 @@ pass.password = true
 -- LOGIKA NETMOD: PROXY & TLS TYPE
 -- ==========================================
 
--- Dropdown Proxy Type
 proxy_type = s:option(ListValue, "proxy_type", "Proxy Type :")
 proxy_type:value("None", "None (Direct)")
 proxy_type:value("HTTP", "HTTP Proxy")
 proxy_type.default = "None"
 
--- Field Proxy IP (Hanya muncul jika Proxy = HTTP)
 proxy = s:option(Value, "proxy", "Remote Proxy :")
 proxy:depends("proxy_type", "HTTP")
 
--- Field Proxy Port (Hanya muncul jika Proxy = HTTP)
 proxy_port = s:option(Value, "proxy_port", "Port Proxy :")
 proxy_port.default = "80"
 proxy_port.datatype = "port"
 proxy_port:depends("proxy_type", "HTTP")
 
--- INJEKSI JAVASCRIPT: Menggabungkan baris Proxy & Port bersebelahan
 proxy_port.description = [[
 <script>
 setInterval(function() {
@@ -109,13 +103,11 @@ setInterval(function() {
 </script>
 ]]
 
--- Dropdown TLS Type
 tls_type = s:option(ListValue, "tls_type", "TLS Type :")
 tls_type:value("None", "None (TCP)")
 tls_type:value("TLS", "TLS (SSL/SNI)")
 tls_type.default = "None"
 
--- Field SNI (Hanya muncul jika TLS = TLS)
 sni = s:option(Value, "sni", "SNI :")
 sni:depends("tls_type", "TLS")
 
