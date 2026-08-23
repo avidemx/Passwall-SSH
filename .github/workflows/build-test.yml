@@ -1,4 +1,4 @@
-name: Build Passwall-SSH Mipsel_24kc
+name: Build Passwall-SSH x86_64
 
 on:
   workflow_dispatch:
@@ -19,7 +19,6 @@ jobs:
     - name: Read version from file
       id: read_version
       run: |
-        # Cari file VERSION atau Version tanpa mempermasalahkan huruf besar/kecil
         VER_FILE=$(ls | grep -i "^version$" | head -n 1)
 
         if [ -n "$VER_FILE" ]; then
@@ -58,9 +57,9 @@ jobs:
             url_prefix: "https://downloads.openwrt.org/releases/25.12.5/targets"
 
         arch_item:
-          - target: "ramips"
-            subtarget: "mt7621"
-            arch: "mipsel_24kc"
+          - target: "x86"
+            subtarget: "64"
+            arch: "x86_64"
 
     steps:
     - name: Checkout repository
