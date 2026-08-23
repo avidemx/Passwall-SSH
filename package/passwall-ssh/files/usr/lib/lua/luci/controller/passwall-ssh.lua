@@ -9,7 +9,7 @@ function index()
     entry({"admin", "services", "passwall-ssh", "get_log"}, call("action_get_log"))
     entry({"admin", "services", "passwall-ssh", "clear_log"}, call("action_clear_log"))
     entry({"admin", "services", "passwall-ssh", "get_app_info"}, call("action_get_app_info")).leaf = true
-    entry({"admin", "services", "passwall-ssh", "check_app_update"}, call("action_check_app_update")).leaf = true
+    entry({"admin", "services", "passwall-ssh", "get_update_status"}, call("action_get_update_status")).leaf = true
     entry({"admin", "services", "passwall-ssh", "do_app_update"}, call("action_do_app_update")).leaf = true
 end
 
@@ -107,30 +107,56 @@ function action_get_app_info()
     luci.http.write_json(resp)
 end
 
-function action_check_app_update()
+-- ==========================================
+-- BACA CACHE UPDATE & AUTO-CHECK
+-- ==========================================
+function action_get_update_status()
+    local sys = require "luci.sys"
+    local fs = require "nixio.fs"
+    local cache_file = "/etc/passwall-ssh_update.json"
+    
+    local stat = fs.stat(cache_file)
+    local current_time = os.time()
+    local needs_update = false
+    
+    if not stat then
+        needs_update = true
+    else
+        if (current_time - stat.mtime) > 86400 then
+            needs_update = true
+        end
+    end
+    
+    if needs_update then
+        sys.call("/usr/bin/lua -e 'require(\"luci.controller.passwall-ssh\").do_background_update_check()' >/dev/null 2>&1 &")
+    end
+    
+    local f = io.open(cache_file, "r")
+    if f then
+        local content = f:read("*all")
+        f:close()
+        luci.http.prepare_content("application/json")
+        luci.http.write(content)
+    else
+        luci.http.prepare_content("application/json")
+        luci.http.write('{"has_update": false}')
+    end
+end
+
+-- ==========================================
+-- FUNGSI CHECK UPDATE
+-- ==========================================
+function do_background_update_check()
     local sys = require "luci.sys"
     local json = require "luci.jsonc"
-    
     local sys_info = get_system_info()
     
     local proxy_url = "https://passwall-ssh.avidemuxvegas.workers.dev/"
-    
     local cmd = string.format("curl -sIL -m 10 '%shttps://github.com/avidemx/Passwall-SSH/releases/latest' 2>/dev/null | grep -i '^location:' | tail -n 1 | awk '{print $2}'", proxy_url)
     local loc_header = sys.exec(cmd) or ""
     loc_header = loc_header:gsub("[\r\n%s]+", "")
     
-    local result = {
-        success = false,
-        current_version = sys_info.cur_ver,
-        latest_version = "",
-        has_update = false,
-        download_url = "",
-        asset_name = "",
-        message = ""
-    }
-    
     local raw_tag = loc_header:match("/releases/tag/([^/?#]+)")
-    
     if not raw_tag or raw_tag == "" then
         local api_cmd = "curl -skLf -m 8 -H 'User-Agent: OpenWrt' 'https://api.github.com/repos/avidemx/Passwall-SSH/releases/latest' 2>/dev/null"
         local api_res = sys.exec(api_cmd) or ""
@@ -140,34 +166,33 @@ function action_check_app_update()
         end
     end
 
+    local result = { has_update = false }
+
     if raw_tag and raw_tag ~= "" then
         local latest_tag = raw_tag:gsub("^v", "")
-        result.success = true
-        result.latest_version = latest_tag
-        
         local target_file = string.format("passwall-ssh_%s_%s_%s.%s", 
             sys_info.os_ver, latest_tag, sys_info.arch, sys_info.pkg_ext
         )
-        
         local dl_url = string.format("%shttps://github.com/avidemx/Passwall-SSH/releases/download/%s/%s", 
             proxy_url, raw_tag, target_file
         )
-        
-        result.download_url = dl_url
-        result.asset_name = target_file
         
         local clean_cur = tostring(sys_info.cur_ver):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
         local clean_latest = tostring(latest_tag):gsub("^v", ""):gsub("%-r%d+", ""):gsub("%-%d+$", ""):gsub("%s+", "")
         
         if clean_latest ~= clean_cur then
             result.has_update = true
+            result.latest_version = latest_tag
+            result.download_url = dl_url
         end
-    else
-        result.message = "Gagal mendeteksi rilis terbaru."
     end
     
-    luci.http.prepare_content("application/json")
-    luci.http.write_json(result)
+    -- Tulis cache hasil pengecekan secara permanen
+    local f = io.open("/etc/passwall-ssh_update.json", "w")
+    if f then
+        f:write(json.stringify(result))
+        f:close()
+    end
 end
 
 function action_do_app_update()
@@ -204,7 +229,6 @@ function action_do_app_update()
         echo "Membackup konfigurasi..." >> "$LOG_FILE"
         cp -f /etc/config/passwall-ssh /tmp/passwall-ssh.bak 2>/dev/null
         ENABLED=$(uci -q get passwall-ssh.main.enabled || echo "0")
-        #rm -f /etc/config/passwall-ssh
         
         # 3. Stop Service Lama
         echo "Menghentikan service lama..." >> "$LOG_FILE"
@@ -226,9 +250,7 @@ function action_do_app_update()
             INSTALL_STATUS=$?
         fi
         
-        # --- BYPASS APK FAKE ERROR (127) ---
         if [ $INSTALL_STATUS -ne 0 ]; then
-            # Cek apakah apk error tapi file sebenarnya sukses terekstrak
             if grep -q "Installing file to" "$LOG_FILE"; then
                 echo "Warning: Error pada script post-upgrade apk (127). Diabaikan karena file sukses terinstal." >> "$LOG_FILE"
                 INSTALL_STATUS=0
@@ -239,12 +261,15 @@ function action_do_app_update()
             fi
         fi
         
-        # 5. Restore Config
+        # 5. Restore Config & Hapus Notifikasi
         echo "Mengembalikan konfigurasi..." >> "$LOG_FILE"
         if [ -f /tmp/passwall-ssh.bak ]; then
             cp -f /tmp/passwall-ssh.bak /etc/config/passwall-ssh
             rm -f /tmp/passwall-ssh.bak
         fi
+        
+        # Menghapus file cache status notifikasi supaya tombol menghilang
+        rm -f /etc/passwall-ssh_update.json
         
         # 6. Bersihkan cache
         rm -f "$PKG_FILE" /tmp/do_pw_update.sh /etc/config/passwall-ssh-opkg /etc/config/passwall-ssh.apk-new
