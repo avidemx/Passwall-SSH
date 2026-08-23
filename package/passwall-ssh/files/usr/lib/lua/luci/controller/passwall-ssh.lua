@@ -108,7 +108,7 @@ function action_get_app_info()
 end
 
 -- ==========================================
--- BACA CACHE UPDATE & AUTO-CHECK
+-- BACA CACHE UPDATE & AUTO-CHECK DENGAN NOTIF
 -- ==========================================
 function action_get_update_status()
     local sys = require "luci.sys"
@@ -122,7 +122,12 @@ function action_get_update_status()
     if not stat then
         needs_update = true
     else
-        if (current_time - stat.mtime) > 86400 then
+        math.randomseed(os.time() + sys.process.info("pid"))
+        local base_expiry = 86400
+        local jitter = math.random(-14400, 14400)
+        local target_expiry = base_expiry + jitter
+        
+        if (current_time - stat.mtime) > target_expiry then
             needs_update = true
         end
     end
