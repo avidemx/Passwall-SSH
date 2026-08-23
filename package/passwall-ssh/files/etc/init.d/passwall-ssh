@@ -8,8 +8,6 @@ STATE_FILE="/tmp/etc/passwall-ssh.state"
 ENV_FILE="/usr/share/passwall-ssh/passwall-ssh.env"
 LOCK="/var/run/passwall-ssh.control.lock"
 
-# (VARIABEL UPS_IP & UPS_IF DIHAPUS DARI SINI, DIPINDAHKAN KE DALAM _start)
-
 acquire_lock() {
     local count=0
     while ! mkdir "$LOCK" 2>/dev/null; do
@@ -88,7 +86,6 @@ _start() {
         return 0
     fi
 
-    # PENTING: Bersihkan semua proses lama terlebih dahulu agar tidak terjadi proses ganda!
     _stop
 
     echo "STARTING" > "$STATE_FILE"
@@ -97,10 +94,8 @@ _start() {
     rm -f /tmp/etc/passwall-ssh.kex_failed
 
     if [ -f /tmp/etc/passwall-ssh.is_retry ]; then
-        # Ini ulah Watchdog, hapus benderanya saja, biarkan hitungan retry berlanjut
         rm -f /tmp/etc/passwall-ssh.is_retry
     else
-        # Tidak ada bendera, berarti ini restart MANUAL dari LuCI. Reset hitungan!
         rm -f /tmp/etc/passwall-ssh.retry
     fi
 
@@ -108,7 +103,6 @@ _start() {
 
     [ -f "$ENV_FILE" ] && . "$ENV_FILE"
     
-    # PERBAIKAN 1: Ambil IP Gateway dan Interface HANYA pada saat servis distart!
     UPS_IP=$(ip route 2>/dev/null | awk '/default/ {print $3; exit}')
     UPS_IF=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
     
@@ -118,7 +112,6 @@ _start() {
     write_log "Upstream Interface: $UPS_IF ($UPS_IP)"
     write_log "Connecting to server"
 
-    # PERBAIKAN 2: Semua blocking loop (while ! netstat) DIHAPUS. Watchdog akan mengurusnya.
     if [ "$TRANSPORT" = "TLS" ]; then
         stunnel /usr/share/passwall-ssh/stunnel.conf &
         echo $! > /var/run/passwall-stunnel.pid
@@ -127,7 +120,6 @@ _start() {
     lua /usr/share/passwall-ssh/passwall-ssh-http.lua &
     echo $! > /var/run/passwall-http.pid
 
-    # Jalankan Watchdog SEGERA tanpa ditunda oleh apapun
     /usr/share/passwall-ssh/watchdog.sh &
     echo $! > /var/run/passwall-ssh-watchdog.pid
 
