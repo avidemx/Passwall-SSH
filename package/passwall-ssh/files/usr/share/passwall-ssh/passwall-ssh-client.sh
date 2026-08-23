@@ -31,7 +31,6 @@ rm -f /tmp/etc/passwall-ssh.need_restart
 
 export SSHPASS="$PASSWORD"
 
-# LOOP UTAMA SSH
 while true; do
     if [ -f /tmp/etc/passwall-ssh.stop_loop ] || [ -f /tmp/etc/passwall-ssh.need_restart ]; then
         break
@@ -86,12 +85,12 @@ while true; do
         *"OpenSSL "*|\
         *"Connection closed by UNKNOWN"*|\
         *"Warning: Permanently added"*)
-            IS_BANNER=0 # Reset penanda banner
+            IS_BANNER=0
             continue 
             ;;
 
         *"Permission denied"*)
-            IS_BANNER=0 # Reset penanda banner
+            IS_BANNER=0
             if [ -f /tmp/etc/passwall-ssh.kex_failed ]; then
                 echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] Permission denied (Ignored, network glitch)</span>" >> "$LOG"
             else
