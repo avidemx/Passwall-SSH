@@ -122,12 +122,14 @@ function action_get_update_status()
     if not stat then
         needs_update = true
     else
-        math.randomseed(os.time() + sys.process.info("pid"))
+        math.randomseed(current_time)
+        
         local base_expiry = 86400
         local jitter = math.random(-14400, 14400)
         local target_expiry = base_expiry + jitter
         
-        if (current_time - stat.mtime) > target_expiry then
+        local mtime = stat.mtime or 0
+        if (current_time - mtime) > target_expiry then
             needs_update = true
         end
     end
@@ -137,6 +139,11 @@ function action_get_update_status()
     end
     
     local f = io.open(cache_file, "r")
+    
+    luci.http.header("Cache-Control", "no-cache, no-store, must-revalidate")
+    luci.http.header("Pragma", "no-cache")
+    luci.http.header("Expires", "0")
+    
     if f then
         local content = f:read("*all")
         f:close()
@@ -192,7 +199,6 @@ function do_background_update_check()
         end
     end
     
-    -- Tulis cache hasil pengecekan secara permanen
     local f = io.open("/etc/passwall-ssh_update.json", "w")
     if f then
         f:write(json.stringify(result))
