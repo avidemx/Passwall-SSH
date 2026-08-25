@@ -394,7 +394,11 @@ header_ui.cfgvalue = function()
         }
 
         function checkUpdateStatus() {
-            fetch(GET_UPDATE_STATUS_URL)
+            // Tambahkan anti-cache (URL timestamp & fetch parameter)
+            var url = GET_UPDATE_STATUS_URL;
+            url += (url.indexOf('?') === -1 ? '?' : '&') + 't=' + new Date().getTime();
+            
+            fetch(url, { cache: 'no-store' })
                 .then(function(r) { return r.json(); })
                 .then(function(res) {
                     if (res.has_update) {
@@ -402,9 +406,11 @@ header_ui.cfgvalue = function()
                         var btn = document.getElementById('btn-app-update');
                         var resBox = document.getElementById('update-check-result');
                         
-                        btn.style.display = "inline-block";
-                        resBox.style.display = "block";
-                        resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + ' is available!</span>';
+                        if(btn) btn.style.display = "inline-block";
+                        if(resBox) {
+                            resBox.style.display = "block";
+                            resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + ' is available!</span>';
+                        }
                         
                         latestDownloadUrl = res.download_url;
                         updateReady = true;
