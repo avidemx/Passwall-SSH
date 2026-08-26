@@ -209,7 +209,7 @@ local function generate_steps(payload, is_connect)
 end
 
 -- ==========================================
--- 4. GLOBAL EVENT LOOP ENGINE (ASYNC WRITE + SHORT TIMEOUT CONNECT)
+-- 4. GLOBAL EVENT LOOP ENGINE (SMART PARSER)
 -- ==========================================
 
 local server, bind_err = socket.bind(LISTEN_HOST, LISTEN_PORT)
@@ -229,11 +229,8 @@ local function set_wants_write(sock, wants)
     for i, s in ipairs(write_sockets) do
         if s == sock then idx = i; break end
     end
-    if wants and not idx then
-        table.insert(write_sockets, sock)
-    elseif not wants and idx then
-        table.remove(write_sockets, idx)
-    end
+    if wants and not idx then table.insert(write_sockets, sock)
+    elseif not wants and idx then table.remove(write_sockets, idx) end
 end
 
 local function cleanup(sess)
@@ -298,7 +295,6 @@ while true do
     for sock, sess in pairs(session_pairs) do
         if sock == sess.client and not sess.closed then 
             if now - sess.last_active > 300 then
-                log("Idle Timeout - Terminating Zombie Session")
                 cleanup(sess)
             elseif sess.out_state == "WAIT_DELAY" then
                 local time_left = sess.delay_until - now
@@ -318,20 +314,16 @@ while true do
     if writable then
         for _, sock in ipairs(writable) do
             local sess = session_pairs[sock]
-            
             if sess and not sess.closed and write_buffers[sock] and #write_buffers[sock] > 0 then
                 local sent, err_send, last = sock:send(write_buffers[sock])
                 if sent then
                     write_buffers[sock] = write_buffers[sock]:sub(sent + 1)
                 elseif err_send == "timeout" then
-                    if last and last > 0 then
-                        write_buffers[sock] = write_buffers[sock]:sub(last + 1)
-                    end
+                    if last and last > 0 then write_buffers[sock] = write_buffers[sock]:sub(last + 1) end
                 else
                     cleanup(sess)
                 end
             end
-            
             if sess and not sess.closed then
                 if not write_buffers[sock] or write_buffers[sock] == "" then
                     set_wants_write(sock, false)
@@ -357,6 +349,7 @@ while true do
                         out_steps = {},
                         out_index = 1,
                         banner = "",
+                        http_buffer = "",
                         closed = false
                     }
                 end
@@ -412,9 +405,7 @@ while true do
                         else
                             local data, err_recv, partial = sock:receive(8192)
                             local chunk = data or partial or ""
-                            if #chunk > 0 then
-                                queue_send(sess.remote, chunk)
-                            end
+                            if #chunk > 0 then queue_send(sess.remote, chunk) end
                             if err_recv == "closed" then cleanup(sess) end
                         end
 
@@ -424,29 +415,36 @@ while true do
                         
                         if #chunk > 0 then
                             if sess.in_need_200 or sess.out_state == "WAIT_INCOMING_HTTP" then
-                                if chunk:find("^HTTP/1%.") then
-                                    if sess.in_need_200 then
-                                        log("> Injecting HTTP 200 OK (Buffered)")
-                                        queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
-                                        sess.in_need_200 = false
-                                    end
+                                sess.http_buffer = (sess.http_buffer or "") .. chunk
+                                local end_header = sess.http_buffer:find("\r\n\r\n")
+                                
+                                if end_header then
+                                    local header_data = sess.http_buffer:sub(1, end_header - 1)
                                     
-                                    local end_header = chunk:find("\r\n\r\n")
-                                    if end_header then 
-                                        chunk = chunk:sub(end_header + 4) 
-                                    else 
-                                        chunk = "" 
-                                    end
+                                    log("--- SERVER RESPONSE ---")
+                                    for line in header_data:gmatch("([^\r\n]+)") do log(line) end
+                                    log("-----------------------")
                                     
-                                    if sess.out_state == "WAIT_INCOMING_HTTP" then
-                                        sess.out_state = "RUNNING"
-                                        sess.out_index = sess.out_index + 1
-                                        execute_sequence(sess)
+                                    if header_data:match("^HTTP/1%.%d%s+101") or header_data:match("^HTTP/1%.%d%s+200") then
+                                        if sess.in_need_200 then
+                                            queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
+                                            sess.in_need_200 = false
+                                        end
+                                        
+                                        local remainder = sess.http_buffer:sub(end_header + 4)
+                                        if #remainder > 0 then queue_send(sess.client, remainder) end
+                                        
+                                        if sess.out_state == "WAIT_INCOMING_HTTP" then
+                                            sess.out_state = "RUNNING"
+                                            sess.out_index = sess.out_index + 1
+                                            execute_sequence(sess)
+                                        end
+                                    else
+                                        log("FATAL ERROR: Payload Rejected by Server!")
+                                        cleanup(sess)
                                     end
                                 end
-                            end
-                            
-                            if #chunk > 0 then
+                            else
                                 queue_send(sess.client, chunk)
                             end
                         end
