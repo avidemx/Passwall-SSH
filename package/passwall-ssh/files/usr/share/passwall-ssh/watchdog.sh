@@ -118,7 +118,7 @@ wait_port() {
     
         if [ -f /tmp/etc/passwall-ssh.auth_failed ]; then
             local SRV_LOG=$(head -n 1 /tmp/etc/passwall-ssh.auth_failed 2>/dev/null)
-            [ -n "$SRV_LOG" ] && log "[SERVER LOG] $SRV_LOG"
+            [ -n "$SRV_LOG" ]
             echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] FAILED: Check Username/Password</font>" >> "$LOG"
             rm -f /tmp/etc/passwall-ssh.auth_failed
             trigger_stop
@@ -126,7 +126,7 @@ wait_port() {
         
         if [ -f /tmp/etc/passwall-ssh.kex_failed ]; then
             local SRV_LOG=$(head -n 1 /tmp/etc/passwall-ssh.kex_failed 2>/dev/null)
-            [ -n "$SRV_LOG" ] && log "[SERVER LOG] $SRV_LOG"
+            [ -n "$SRV_LOG" ]
             rm -f /tmp/etc/passwall-ssh.kex_failed
             trigger_restart "Connection closed by server (KEX Failed) during initialization!"
         fi
