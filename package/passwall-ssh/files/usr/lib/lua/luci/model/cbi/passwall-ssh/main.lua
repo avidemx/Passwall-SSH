@@ -731,14 +731,9 @@ function conf.create(self, section)
     luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", random_id))
 end
 
-local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
-local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
-
-if not is_old_openwrt then
-    name_list = conf:option(DummyValue, "alias", "Name")
-    function name_list.cfgvalue(self, section)
-        return m.uci:get("passwall-ssh", section, "alias") or section
-    end
+name_list = conf:option(DummyValue, "alias", "Name")
+function name_list.cfgvalue(self, section)
+    return m.uci:get("passwall-ssh", section, "alias") or section
 end
 
 host_list = conf:option(DummyValue, "host", "Address")
