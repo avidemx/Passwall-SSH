@@ -320,7 +320,13 @@ end
 function action_check_services()
     local sys = require "luci.sys"
     local uci = require "luci.model.uci".cursor()
-    local active_profile = uci:get("passwall-ssh", "main", "selected_profile") or "No Profile"
+
+    local active_profile_id = uci:get("passwall-ssh", "main", "selected_profile")
+    local active_profile = "No Profile"
+
+    if active_profile_id and active_profile_id ~= "" then
+        active_profile = uci:get("passwall-ssh", active_profile_id, "alias") or active_profile_id
+    end
 
     sys.exec("mkdir -p /tmp/state/passwall-ssh")
     local core = sys.call("pidof badvpn-tun2socks >/dev/null 2>&1") == 0 and "1" or "0"
