@@ -11,9 +11,11 @@ m.on_after_commit = function(self)
     luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh"))
 end
 
-local active_profile = m.uci:get("passwall-ssh", "main", "selected_profile")
-if not active_profile or active_profile == "" then
-    active_profile = "No Profile"
+local active_profile_id = m.uci:get("passwall-ssh", "main", "selected_profile")
+local active_profile = "No Profile"
+
+if active_profile_id and active_profile_id ~= "" then
+    active_profile = m.uci:get("passwall-ssh", active_profile_id, "alias") or active_profile_id
 end
 
 -- ==========================================
@@ -660,7 +662,10 @@ sel = s:option(ListValue, "selected_profile", translate("Profile"))
 sel.default = ""
 sel:value("", "-- Pilih Profile --")
 m.uci:foreach("passwall-ssh", "profile", function(p)
-    if p['.name'] then sel:value(p['.name'], p['.name']) end
+    if p['.name'] then 
+        local display_name = p.alias or p['.name']
+        sel:value(p['.name'], display_name) 
+    end
 end)
 
 -- --- OPSI UNTUK TAB DNS ---
@@ -697,28 +702,42 @@ dns_url.default = "cloudflare-dns.com/dns-query"
 conf = m:section(TypedSection, "profile", "<span id='marker-config'></span>")
 conf.template = "cbi/tblsection" 
 conf.addremove = true
-conf.anonymous = false
+conf.anonymous = true
+
+function conf.remove(self, section)
+    local active_prof = m.uci:get("passwall-ssh", "main", "selected_profile")
+    
+    if active_prof == section then
+        m.uci:set("passwall-ssh", "main", "selected_profile", "")
+        m.uci:set("passwall-ssh", "main", "enabled", "0")
+    end
+    
+    TypedSection.remove(self, section)
+end
 
 conf.extedit = luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", "%s")
 
 function conf.create(self, section)
-    local created = TypedSection.create(self, section)
-    if created then
-        m.uci:save("passwall-ssh")
-        m.uci:commit("passwall-ssh")
-        local target_name = type(created) == "string" and created or section
-        luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", target_name))
-    end
-    return created
+    local uuid = sys.exec("cat /proc/sys/kernel/random/uuid 2>/dev/null") or "1a2b3c4d"
+    local random_id = "p_" .. string.sub(uuid, 1, 8)
+    
+    m.uci:section("passwall-ssh", "profile", random_id)
+    
+    m.uci:set("passwall-ssh", random_id, "alias", "Nama Profil (Bebas Text)")
+    
+    m.uci:save("passwall-ssh")
+    m.uci:commit("passwall-ssh")
+
+    luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh", "edit", random_id))
 end
 
 local os_release = sys.exec("cat /etc/os-release 2>/dev/null") or ""
 local is_old_openwrt = os_release:match('VERSION_ID="24') or os_release:match('VERSION_ID="23') or os_release:match('VERSION_ID="22') or os_release:match('VERSION_ID="21')
 
 if not is_old_openwrt then
-    name_list = conf:option(DummyValue, "_name", "Name")
+    name_list = conf:option(DummyValue, "alias", "Name")
     function name_list.cfgvalue(self, section)
-        return section
+        return m.uci:get("passwall-ssh", section, "alias") or section
     end
 end
 
