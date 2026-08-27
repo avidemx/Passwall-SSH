@@ -4,7 +4,10 @@ local sys = require "luci.sys"
 
 local config_name = arg[1] or ""
 
-m = Map("passwall-ssh", "EDIT PROFILE", "Detail Konfigurasi untuk Profil: <b>" .. config_name .. "</b>")
+local uci = require("luci.model.uci").cursor()
+local current_alias = uci:get("passwall-ssh", config_name, "alias") or config_name
+
+m = Map("passwall-ssh", "EDIT PROFILE", "Detail Konfigurasi untuk Profil: <b>" .. current_alias .. "</b>")
 m.redirect = dsp.build_url("admin", "services", "passwall-ssh")
 
 s = m:section(NamedSection, config_name, "profile", "")
@@ -14,14 +17,8 @@ s.anonymous = false
 -- ==========================================
 -- VIRTUAL FIELD: Nama Profile
 -- ==========================================
-name = s:option(Value, "_name", "Nama Profile :")
+name = s:option(Value, "alias", "Nama Profile :")
 name.rmempty = false
-name.datatype = "uciname"
-function name.cfgvalue(self, section)
-    return section
-end
-function name.write(self, section, value)
-end
 
 -- ==========================================
 -- FIELD KONEKSI UTAMA
@@ -31,10 +28,10 @@ host_port = s:option(Value, "host_port", "SSH Port :")
 user = s:option(Value, "username", "Username :")
 
 pass = s:option(Value, "password", "Password :")
-pass.password = true
+pass.password = false
 
 -- ==========================================
--- LOGIKA NETMOD: PROXY & TLS TYPE
+-- PROXY & TLS TYPE
 -- ==========================================
 
 proxy_type = s:option(ListValue, "proxy_type", "Proxy Type :")
@@ -115,7 +112,7 @@ sni:depends("tls_type", "TLS")
 -- ADVANCED & PAYLOAD
 -- ==========================================
 udpgw_port = s:option(Value, "udpgw_port", "UDPGW Port :")
-udpgw_port.default = "7500"
+udpgw_port.default = "7300"
 udpgw_port.datatype = "port"
 
 payload = s:option(TextValue, "payload", "Payload :")
@@ -126,17 +123,6 @@ payload.rows = 5
 -- ==========================================
 function m.on_after_commit(self)
     self.uci:commit("passwall-ssh")
-    local new_name = name:formvalue(config_name)
-    
-    if new_name and new_name ~= "" and new_name ~= config_name then
-        sys.call("uci rename passwall-ssh." .. config_name .. "=" .. new_name)
-        local current_selected = sys.exec("uci -q get passwall-ssh.main.selected_profile"):gsub("\n", "")
-        if current_selected == config_name then
-            sys.call("uci set passwall-ssh.main.selected_profile='" .. new_name .. "'")
-        end
-        sys.call("uci commit passwall-ssh")
-    end
-    
     http.redirect(dsp.build_url("admin", "services", "passwall-ssh"))
 end
 
