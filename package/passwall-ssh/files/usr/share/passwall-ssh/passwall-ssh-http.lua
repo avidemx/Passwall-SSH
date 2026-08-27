@@ -340,6 +340,8 @@ while true do
                     client:settimeout(0)
                     client:setoption("tcp-nodelay", true)
                     table.insert(read_sockets, client)
+                    
+                    -- [PERBAIKAN]: Menambahkan parameter peek_buffer dan status_logged
                     session_pairs[client] = {
                         client = client,
                         remote = nil,
@@ -350,6 +352,8 @@ while true do
                         out_index = 1,
                         banner = "",
                         http_buffer = "",
+                        peek_buffer = "",
+                        status_logged = false,
                         closed = false
                     }
                 end
@@ -409,21 +413,37 @@ while true do
                             if err_recv == "closed" then cleanup(sess) end
                         end
 
+                    -- [PERBAIKAN BESAR]: Menangani Payload dengan atau tanpa [split]
                     elseif sock == sess.remote then
                         local data, err_recv, partial = sock:receive(8192)
                         local chunk = data or partial or ""
                         
                         if #chunk > 0 then
+                            
+                            -- 1. SMART PEEK: Intip baris pertama status HTTP lalu catat (tanpa merusak jalur data)
+                            if not sess.status_logged then
+                                sess.peek_buffer = (sess.peek_buffer or "") .. chunk
+                                if sess.peek_buffer:find("\n") then
+                                    local status_line = sess.peek_buffer:match("([^\r\n]+)")
+                                    if status_line and status_line:match("^HTTP/1%.") then
+                                        log("Server Status: " .. status_line)
+                                    end
+                                    sess.status_logged = true
+                                    sess.peek_buffer = "" -- Kosongkan memori
+                                elseif #sess.peek_buffer > 2048 then
+                                    -- Cegah memori membengkak jika bukan koneksi HTTP
+                                    sess.status_logged = true 
+                                    sess.peek_buffer = ""
+                                end
+                            end
+
+                            -- 2. LOGIKA PEMROSESAN (Apakah butuh modifikasi header atau langsung diteruskan)
                             if sess.in_need_200 or sess.out_state == "WAIT_INCOMING_HTTP" then
                                 sess.http_buffer = (sess.http_buffer or "") .. chunk
                                 local end_header = sess.http_buffer:find("\r\n\r\n")
                                 
                                 if end_header then
                                     local header_data = sess.http_buffer:sub(1, end_header - 1)
-                                    
-                                    log("--- SERVER RESPONSE ---")
-                                    for line in header_data:gmatch("([^\r\n]+)") do log(line) end
-                                    log("-----------------------")
                                     
                                     if header_data:match("^HTTP/1%.%d%s+101") or header_data:match("^HTTP/1%.%d%s+200") then
                                         if sess.in_need_200 then
