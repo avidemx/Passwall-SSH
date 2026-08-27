@@ -1,4 +1,4 @@
-name: Build Passwall-SSH x86_64
+name: Build Passwall-SSH TEST
 
 on:
   workflow_dispatch:
@@ -61,6 +61,10 @@ jobs:
             subtarget: "64"
             arch: "x86_64"
 
+          - target: "ramips"
+            subtarget: "mt7621"
+            arch: "mipsel_24kc"
+            
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
