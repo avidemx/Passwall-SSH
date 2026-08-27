@@ -3,13 +3,16 @@
 LOG_FILE="/tmp/etc/passwall-ssh.log"
 
 SELECTED=$(uci -q get passwall-ssh.main.selected_profile)
+HOST=$(uci -q get passwall-ssh.$SELECTED.host)
 
-if [ -z "$SELECTED" ]; then
-    echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] FAILED: Failed to apply Profile configuration!</font>" >> "$LOG_FILE"
+if [ -z "$SELECTED" ] || [ -z "$HOST" ]; then
+    echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] FAILED: Profile '$SELECTED' not found or invalid!</font>" >> "$LOG_FILE"
     exit 1
 fi
 
-HOST=$(uci -q get passwall-ssh.$SELECTED.host)
+ALIAS_NAME=$(uci -q get passwall-ssh.$SELECTED.alias)
+[ -z "$ALIAS_NAME" ] && ALIAS_NAME="$SELECTED"
+
 HOST_PORT=$(uci -q get passwall-ssh.$SELECTED.host_port)
 USERNAME=$(uci -q get passwall-ssh.$SELECTED.username)
 PASSWORD=$(uci -q get passwall-ssh.$SELECTED.password)
@@ -21,7 +24,7 @@ SNI=$(uci -q get passwall-ssh.$SELECTED.sni)
 UDPGW_PORT=$(uci -q get passwall-ssh.$SELECTED.udpgw_port)
 PAYLOAD_RAW=$(uci -q get passwall-ssh.$SELECTED.payload)
 
-[ -z "$UDPGW_PORT" ] && UDPGW_PORT="7200"
+[ -z "$UDPGW_PORT" ] && UDPGW_PORT="7300"
 
 ### TRANSLASI PAYLOAD ###
 PAYLOAD_PY=$(printf '%s' "$PAYLOAD_RAW" \
@@ -72,8 +75,9 @@ else
     [ "$DNS_SERVER" = "manual" ] && DNS_SERVER=$(uci -q get passwall-ssh.main.dns_manual)
 fi
 
+# GUNAKAN $ALIAS_NAME SEBAGAI PROFILE_NAME
 cat >/usr/share/passwall-ssh/passwall-ssh.env <<EOF
-PROFILE_NAME='$SELECTED'
+PROFILE_NAME='$ALIAS_NAME'
 TRANSPORT='$TRANSPORT'
 HOST='$HOST'
 HOST_PORT='$HOST_PORT'
