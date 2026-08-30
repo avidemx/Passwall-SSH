@@ -115,6 +115,26 @@ local function expand_multipliers(payload)
     end)
 end
 
+-- [PERBAIKAN FITUR]: Rotate Memory Persistent 
+local ROTATE_FILE = "/tmp/etc/passwall-rotate.tmp"
+local function get_persistent_rotate()
+    local rf = io.open(ROTATE_FILE, "r")
+    if rf then
+        local val = tonumber(rf:read("*a"))
+        rf:close()
+        return val or 0
+    end
+    return 0
+end
+
+local function set_persistent_rotate(val)
+    local wf = io.open(ROTATE_FILE, "w")
+    if wf then
+        wf:write(tostring(val))
+        wf:close()
+    end
+end
+
 local RAW_EXPANDED = expand_multipliers(RAW_PAYLOAD)
 local STATIC_PAYLOAD = RAW_EXPANDED
 
@@ -134,8 +154,6 @@ STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[proxy_port%]", ENV.PROXY_PORT or ""
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_host%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_port%]", "443")
-
-local rotate_index = 0
 
 local function parse_tags_dynamic(payload, host, port, client_raw_request)
     if not payload then return "" end
@@ -180,8 +198,10 @@ local function parse_tags_dynamic(payload, host, port, client_raw_request)
         local items = {}
         for item in list:gmatch("[^;]+") do table.insert(items, item) end
         if #items > 0 then
-            rotate_index = (rotate_index % #items) + 1
-            return items[rotate_index]
+            local current_index = get_persistent_rotate()
+            current_index = (current_index % #items) + 1
+            set_persistent_rotate(current_index)
+            return items[current_index]
         end
         return ""
     end)
@@ -438,7 +458,6 @@ while true do
                                 local status_line = sess.peek_buffer:match("([^\r\n]+)")
                                 if status_line and status_line:match("^HTTP/1%.") then
                                     if sess.last_logged_status ~= status_line then
-                                        -- Menggunakan log_status tanpa teks awalan
                                         log_status(status_line)
                                         sess.last_logged_status = status_line
                                     end
