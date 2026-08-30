@@ -15,6 +15,14 @@ local function log(msg)
     end
 end
 
+local function log_status(msg)
+    local f = io.open(LOG, "a")
+    if f then
+        f:write(string.format("<font color=\"#FFFF00\">[%s] %s</font>\n", os.date("%Y-%m-%d %H:%M:%S"), msg))
+        f:close()
+    end
+end
+
 local function log_payload(title, payload)
     if not payload or payload == "" then return end
     log(title)
@@ -108,8 +116,13 @@ local function expand_multipliers(payload)
 end
 
 local RAW_EXPANDED = expand_multipliers(RAW_PAYLOAD)
-
 local STATIC_PAYLOAD = RAW_EXPANDED
+
+STATIC_PAYLOAD = STATIC_PAYLOAD:gsub("\\\\", "\\")
+STATIC_PAYLOAD = STATIC_PAYLOAD:gsub("\\r\\n", "\r\n")
+STATIC_PAYLOAD = STATIC_PAYLOAD:gsub("\\r", "\r")
+STATIC_PAYLOAD = STATIC_PAYLOAD:gsub("\\n", "\n")
+
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[crlf%]", "\r\n")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[lf%]", "\n")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[cr%]", "\r")
@@ -341,19 +354,19 @@ while true do
                     client:setoption("tcp-nodelay", true)
                     table.insert(read_sockets, client)
                     
-                    -- [PERBAIKAN]: Menambahkan parameter peek_buffer dan status_logged
                     session_pairs[client] = {
                         client = client,
                         remote = nil,
                         last_active = now,
                         in_need_200 = false,
+                        tunnel_established = false,
                         out_state = "INIT",
                         out_steps = {},
                         out_index = 1,
                         banner = "",
                         http_buffer = "",
                         peek_buffer = "",
-                        status_logged = false,
+                        last_logged_status = "",
                         closed = false
                     }
                 end
@@ -413,37 +426,58 @@ while true do
                             if err_recv == "closed" then cleanup(sess) end
                         end
 
-                    -- [PERBAIKAN BESAR]: Menangani Payload dengan atau tanpa [split]
                     elseif sock == sess.remote then
                         local data, err_recv, partial = sock:receive(8192)
                         local chunk = data or partial or ""
                         
                         if #chunk > 0 then
                             
-                            -- 1. SMART PEEK: Intip baris pertama status HTTP lalu catat (tanpa merusak jalur data)
-                            if not sess.status_logged then
-                                sess.peek_buffer = (sess.peek_buffer or "") .. chunk
-                                if sess.peek_buffer:find("\n") then
-                                    local status_line = sess.peek_buffer:match("([^\r\n]+)")
-                                    if status_line and status_line:match("^HTTP/1%.") then
-                                        log("Server Status: " .. status_line)
+                            -- 1. SMART PEEK
+                            sess.peek_buffer = (sess.peek_buffer or "") .. chunk
+                            if sess.peek_buffer:find("\n") then
+                                local status_line = sess.peek_buffer:match("([^\r\n]+)")
+                                if status_line and status_line:match("^HTTP/1%.") then
+                                    if sess.last_logged_status ~= status_line then
+                                        -- Menggunakan log_status tanpa teks awalan
+                                        log_status(status_line)
+                                        sess.last_logged_status = status_line
                                     end
-                                    sess.status_logged = true
-                                    sess.peek_buffer = "" -- Kosongkan memori
-                                elseif #sess.peek_buffer > 2048 then
-                                    -- Cegah memori membengkak jika bukan koneksi HTTP
-                                    sess.status_logged = true 
-                                    sess.peek_buffer = ""
                                 end
+                                sess.peek_buffer = "" 
+                            elseif #sess.peek_buffer > 2048 then
+                                sess.peek_buffer = ""
                             end
 
-                            -- 2. LOGIKA PEMROSESAN (Apakah butuh modifikasi header atau langsung diteruskan)
-                            if sess.in_need_200 or sess.out_state == "WAIT_INCOMING_HTTP" then
+                            -- 2. MAIN PARSER
+                            if not sess.tunnel_established then
                                 sess.http_buffer = (sess.http_buffer or "") .. chunk
-                                local end_header = sess.http_buffer:find("\r\n\r\n")
                                 
-                                if end_header then
-                                    local header_data = sess.http_buffer:sub(1, end_header - 1)
+                                while true do
+                                    local e_pos = sess.http_buffer:find("\r\n\r\n")
+                                    local e_len = 4
+                                    if not e_pos then
+                                        e_pos = sess.http_buffer:find("\n\n")
+                                        e_len = 2
+                                    end
+                                    
+                                    if not e_pos then break end
+                                    
+                                    local header_data = sess.http_buffer:sub(1, e_pos - 1)
+                                    
+                                    local cl = header_data:lower():match("content%-length:%s*(%d+)")
+                                    local body_len = tonumber(cl) or 0
+                                    
+                                    if #sess.http_buffer < (e_pos + e_len + body_len - 1) then
+                                        break 
+                                    end
+
+                                    local status_line = header_data:match("([^\r\n]+)")
+                                    if status_line and status_line:match("^HTTP/1%.") then
+                                        if sess.last_logged_status ~= status_line then
+                                            log_status(status_line)
+                                            sess.last_logged_status = status_line
+                                        end
+                                    end
                                     
                                     if header_data:match("^HTTP/1%.%d%s+101") or header_data:match("^HTTP/1%.%d%s+200") then
                                         if sess.in_need_200 then
@@ -451,7 +485,9 @@ while true do
                                             sess.in_need_200 = false
                                         end
                                         
-                                        local remainder = sess.http_buffer:sub(end_header + 4)
+                                        sess.tunnel_established = true 
+                                        
+                                        local remainder = sess.http_buffer:sub(e_pos + e_len + body_len)
                                         if #remainder > 0 then queue_send(sess.client, remainder) end
                                         
                                         if sess.out_state == "WAIT_INCOMING_HTTP" then
@@ -459,9 +495,16 @@ while true do
                                             sess.out_index = sess.out_index + 1
                                             execute_sequence(sess)
                                         end
+                                        break 
+                                        
                                     else
-                                        log("FATAL ERROR: Payload Rejected by Server!")
-                                        cleanup(sess)
+                                        sess.http_buffer = sess.http_buffer:sub(e_pos + e_len + body_len)
+                                        
+                                        if sess.out_state == "WAIT_INCOMING_HTTP" then
+                                            sess.out_state = "RUNNING"
+                                            sess.out_index = sess.out_index + 1
+                                            execute_sequence(sess)
+                                        end
                                     end
                                 end
                             else
