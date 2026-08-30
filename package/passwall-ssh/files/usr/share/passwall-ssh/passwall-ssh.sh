@@ -192,7 +192,7 @@ start_dnsproxy() {
 
     log "Checking UDP Support | Port : $UDPGW_PORT"
     if nslookup github.com 1.1.1.1 >/dev/null 2>&1; then
-        log "NICE! Server Support UDP"
+        echo "<font color=\"#00FFFF\">[$(date '+%Y-%m-%d %H:%M:%S')] NICE! Server Support UDP</font>" >> "$LOG"
     else
         log "WARNING: Server Tidak Support UDP atau Periksa Port UDPGW! (Default : 7300)"
     fi
@@ -214,7 +214,7 @@ start() {
     setup_nft
     setup_route
     start_dnsproxy
-    log "Service Started"
+    echo "<font color=\"#00FF00\">[$(date '+%Y-%m-%d %H:%M:%S')] Service Started</font>" >> "$LOG"
 }
 
 stop() {
@@ -276,7 +276,7 @@ stop() {
     
     /etc/init.d/dnsmasq reload >/dev/null 2>&1
     log "DNSProxy Stopped - DNS Restored"
-    log "Service Stopped"
+    echo "<font color=\"#FF0000\">[$(date '+%Y-%m-%d %H:%M:%S')] Service Stopped</font>" >> "$LOG"
 }
 
 case "$1" in
