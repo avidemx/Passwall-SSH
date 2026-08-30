@@ -106,8 +106,7 @@ _start() {
     UPS_IP=$(ip route 2>/dev/null | awk '/default/ {print $3; exit}')
     UPS_IF=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
     
-    write_log "----------------------------------------"
-    write_log "Starting Service"
+    echo "<font color=\"#00FF00\">[$(date '+%Y-%m-%d %H:%M:%S')] ── Starting Service ──</font>" >> "$LOG"
     write_log "Using Profile : $PROFILE_NAME"
     write_log "Upstream Interface: $UPS_IF ($UPS_IP)"
     write_log "Connecting to server"
