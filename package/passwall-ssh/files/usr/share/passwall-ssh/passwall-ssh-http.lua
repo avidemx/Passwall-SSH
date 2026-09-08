@@ -115,7 +115,6 @@ local function expand_multipliers(payload)
     end)
 end
 
--- [PERBAIKAN FITUR]: Rotate Memory Persistent 
 local ROTATE_FILE = "/tmp/etc/passwall-rotate.tmp"
 local function get_persistent_rotate()
     local rf = io.open(ROTATE_FILE, "r")
@@ -154,12 +153,6 @@ STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[proxy_port%]", ENV.PROXY_PORT or ""
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_host%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_port%]", "443")
-
--- [PERBAIKAN FITUR]: Auto-Detect Direct Mode (Jika Payload Kosong)
-local IS_PAYLOAD_EMPTY = false
-if not STATIC_PAYLOAD or STATIC_PAYLOAD:match("^%s*$") then
-    IS_PAYLOAD_EMPTY = true
-end
 
 local function parse_tags_dynamic(payload, host, port, client_raw_request)
     if not payload then return "" end
@@ -226,12 +219,6 @@ end
 
 local function generate_steps(payload, is_connect)
     local steps = {}
-    
-    if IS_PAYLOAD_EMPTY then
-        table.insert(steps, { action = "SEND_BANNER" })
-        return steps
-    end
-
     local pos_ds = payload:find("[delay_split]", 1, true)
     local pos_s = payload:find("[split]", 1, true)
     
@@ -391,7 +378,7 @@ while true do
                         remote = nil,
                         last_active = now,
                         in_need_200 = false,
-                        tunnel_established = IS_PAYLOAD_EMPTY, -- [PERBAIKAN]: Instan Tunnel Jika Payload Kosong
+                        tunnel_established = false,
                         out_state = "INIT",
                         out_steps = {},
                         out_index = 1,
@@ -424,12 +411,6 @@ while true do
                                     end
                                     local end_header = chunk:find("\r\n\r\n")
                                     if end_header then chunk = chunk:sub(end_header + 4) else chunk = "" end
-                                    
-                                    -- [PERBAIKAN]: Reply HTTP 200 buatan sendiri jika direct mode
-                                    if IS_PAYLOAD_EMPTY then
-                                        queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
-                                        sess.in_need_200 = false
-                                    end
                                 end
                                 
                                 sess.banner = chunk 
@@ -485,62 +466,70 @@ while true do
                                 sess.peek_buffer = ""
                             end
 
-                            -- 2. MAIN PARSER
+                            -- 2. MAIN PARSER (Dilengkapi Auto-Detect Protocol)
                             if not sess.tunnel_established then
                                 sess.http_buffer = (sess.http_buffer or "") .. chunk
                                 
-                                while true do
-                                    local e_pos = sess.http_buffer:find("\r\n\r\n")
-                                    local e_len = 4
-                                    if not e_pos then
-                                        e_pos = sess.http_buffer:find("\n\n")
-                                        e_len = 2
-                                    end
-                                    
-                                    if not e_pos then break end
-                                    
-                                    local header_data = sess.http_buffer:sub(1, e_pos - 1)
-                                    
-                                    local cl = header_data:lower():match("content%-length:%s*(%d+)")
-                                    local body_len = tonumber(cl) or 0
-                                    
-                                    if #sess.http_buffer < (e_pos + e_len + body_len - 1) then
-                                        break 
-                                    end
+                                -- [PERBAIKAN BUG TIMEOUT]: Cek apakah server membalas dengan format HTTP
+                                if #sess.http_buffer >= 5 and not sess.http_buffer:match("^HTTP/") then
+                                    sess.tunnel_established = true
+                                    queue_send(sess.client, sess.http_buffer)
+                                    sess.http_buffer = ""
+                                else
+                                    -- Jalankan parsing ketat jika memang ini balasan HTTP
+                                    while true do
+                                        local e_pos = sess.http_buffer:find("\r\n\r\n")
+                                        local e_len = 4
+                                        if not e_pos then
+                                            e_pos = sess.http_buffer:find("\n\n")
+                                            e_len = 2
+                                        end
+                                        
+                                        if not e_pos then break end
+                                        
+                                        local header_data = sess.http_buffer:sub(1, e_pos - 1)
+                                        
+                                        local cl = header_data:lower():match("content%-length:%s*(%d+)")
+                                        local body_len = tonumber(cl) or 0
+                                        
+                                        if #sess.http_buffer < (e_pos + e_len + body_len - 1) then
+                                            break 
+                                        end
 
-                                    local status_line = header_data:match("([^\r\n]+)")
-                                    if status_line and status_line:match("^HTTP/1%.") then
-                                        if sess.last_logged_status ~= status_line then
-                                            log_status(status_line)
-                                            sess.last_logged_status = status_line
-                                        end
-                                    end
-                                    
-                                    if header_data:match("^HTTP/1%.%d%s+101") or header_data:match("^HTTP/1%.%d%s+200") then
-                                        if sess.in_need_200 then
-                                            queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
-                                            sess.in_need_200 = false
+                                        local status_line = header_data:match("([^\r\n]+)")
+                                        if status_line and status_line:match("^HTTP/1%.") then
+                                            if sess.last_logged_status ~= status_line then
+                                                log_status(status_line)
+                                                sess.last_logged_status = status_line
+                                            end
                                         end
                                         
-                                        sess.tunnel_established = true 
-                                        
-                                        local remainder = sess.http_buffer:sub(e_pos + e_len + body_len)
-                                        if #remainder > 0 then queue_send(sess.client, remainder) end
-                                        
-                                        if sess.out_state == "WAIT_INCOMING_HTTP" then
-                                            sess.out_state = "RUNNING"
-                                            sess.out_index = sess.out_index + 1
-                                            execute_sequence(sess)
-                                        end
-                                        break 
-                                        
-                                    else
-                                        sess.http_buffer = sess.http_buffer:sub(e_pos + e_len + body_len)
-                                        
-                                        if sess.out_state == "WAIT_INCOMING_HTTP" then
-                                            sess.out_state = "RUNNING"
-                                            sess.out_index = sess.out_index + 1
-                                            execute_sequence(sess)
+                                        if header_data:match("^HTTP/1%.%d%s+101") or header_data:match("^HTTP/1%.%d%s+200") then
+                                            if sess.in_need_200 then
+                                                queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
+                                                sess.in_need_200 = false
+                                            end
+                                            
+                                            sess.tunnel_established = true 
+                                            
+                                            local remainder = sess.http_buffer:sub(e_pos + e_len + body_len)
+                                            if #remainder > 0 then queue_send(sess.client, remainder) end
+                                            
+                                            if sess.out_state == "WAIT_INCOMING_HTTP" then
+                                                sess.out_state = "RUNNING"
+                                                sess.out_index = sess.out_index + 1
+                                                execute_sequence(sess)
+                                            end
+                                            break 
+                                            
+                                        else
+                                            sess.http_buffer = sess.http_buffer:sub(e_pos + e_len + body_len)
+                                            
+                                            if sess.out_state == "WAIT_INCOMING_HTTP" then
+                                                sess.out_state = "RUNNING"
+                                                sess.out_index = sess.out_index + 1
+                                                execute_sequence(sess)
+                                            end
                                         end
                                     end
                                 end
