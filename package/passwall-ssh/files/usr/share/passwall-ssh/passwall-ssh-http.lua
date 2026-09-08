@@ -155,6 +155,12 @@ STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_host%]", ENV.SNI or "")
 STATIC_PAYLOAD = safe_sub(STATIC_PAYLOAD, "%[sni_port%]", "443")
 
+-- [PERBAIKAN FITUR]: Auto-Detect Direct Mode (Jika Payload Kosong)
+local IS_PAYLOAD_EMPTY = false
+if not STATIC_PAYLOAD or STATIC_PAYLOAD:match("^%s*$") then
+    IS_PAYLOAD_EMPTY = true
+end
+
 local function parse_tags_dynamic(payload, host, port, client_raw_request)
     if not payload then return "" end
     
@@ -220,6 +226,12 @@ end
 
 local function generate_steps(payload, is_connect)
     local steps = {}
+    
+    if IS_PAYLOAD_EMPTY then
+        table.insert(steps, { action = "SEND_BANNER" })
+        return steps
+    end
+
     local pos_ds = payload:find("[delay_split]", 1, true)
     local pos_s = payload:find("[split]", 1, true)
     
@@ -379,7 +391,7 @@ while true do
                         remote = nil,
                         last_active = now,
                         in_need_200 = false,
-                        tunnel_established = false,
+                        tunnel_established = IS_PAYLOAD_EMPTY, -- [PERBAIKAN]: Instan Tunnel Jika Payload Kosong
                         out_state = "INIT",
                         out_steps = {},
                         out_index = 1,
@@ -412,6 +424,12 @@ while true do
                                     end
                                     local end_header = chunk:find("\r\n\r\n")
                                     if end_header then chunk = chunk:sub(end_header + 4) else chunk = "" end
+                                    
+                                    -- [PERBAIKAN]: Reply HTTP 200 buatan sendiri jika direct mode
+                                    if IS_PAYLOAD_EMPTY then
+                                        queue_send(sess.client, "HTTP/1.0 200 Connection established\r\n\r\n")
+                                        sess.in_need_200 = false
+                                    end
                                 end
                                 
                                 sess.banner = chunk 
