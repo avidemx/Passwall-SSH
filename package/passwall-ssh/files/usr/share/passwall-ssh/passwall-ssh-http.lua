@@ -55,7 +55,6 @@ local LISTEN_HOST = "127.0.0.1"
 local LISTEN_PORT = tonumber(ENV.LISTEN_PORT) or 8080
 local REMOTE_HOST, REMOTE_PORT
 
--- [PERBAIKAN UNIVERSAL]: Deteksi Proxy meskipun dalam mode TLS/Stunnel
 if ENV.TRANSPORT == "TLS" then
     REMOTE_HOST = "127.0.0.1"
     REMOTE_PORT = tonumber(ENV.STUNNEL_PORT) or 4444
