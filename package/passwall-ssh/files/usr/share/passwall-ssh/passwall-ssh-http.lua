@@ -55,6 +55,7 @@ local LISTEN_HOST = "127.0.0.1"
 local LISTEN_PORT = tonumber(ENV.LISTEN_PORT) or 8080
 local REMOTE_HOST, REMOTE_PORT
 
+-- [PERBAIKAN UNIVERSAL]: Deteksi Proxy meskipun dalam mode TLS/Stunnel
 if ENV.TRANSPORT == "TLS" then
     REMOTE_HOST = "127.0.0.1"
     REMOTE_PORT = tonumber(ENV.STUNNEL_PORT) or 4444
@@ -470,7 +471,7 @@ while true do
                                 sess.peek_buffer = ""
                             end
 
-                            -- 2. MAIN PARSER (Dilengkapi Auto-Detect Protocol)
+                            -- 2. MAIN PARSER 
                             if not sess.tunnel_established then
                                 sess.http_buffer = (sess.http_buffer or "") .. chunk
                                 
@@ -478,6 +479,11 @@ while true do
                                     sess.tunnel_established = true
                                     queue_send(sess.client, sess.http_buffer)
                                     sess.http_buffer = ""
+                                    if sess.out_state == "WAIT_INCOMING_HTTP" then
+                                        sess.out_state = "RUNNING"
+                                        sess.out_index = sess.out_index + 1
+                                        execute_sequence(sess)
+                                    end
                                 else
                                     while true do
                                         local e_pos = sess.http_buffer:find("\r\n\r\n")
