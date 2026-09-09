@@ -31,17 +31,37 @@ PAYLOAD_PY=$(printf '%s' "$PAYLOAD_RAW" \
     | sed "s/\[host\]/$HOST/g" \
     | sed 's|\[ua\]|Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/45.0.2454.85 Safari/537.36|g')
 
-if [ "$PROXY_TYPE" = "HTTP" ]; then
-    [ -z "$PROXY_PORT" ] && PROXY_PORT="80"
-    STUNNEL_CONNECT="$PROXY:$PROXY_PORT"
+if [ -n "$PROXY" ] && [ "$PROXY" != "none" ]; then
+    case "$PROXY" in
+        *:*)
+            STUNNEL_CONNECT="$PROXY"
+            PROXY_HOST="${PROXY%%:*}"
+            PROXY_PORT_VAL="${PROXY#*:}"
+            PROXY="$PROXY_HOST"
+            PROXY_PORT="$PROXY_PORT_VAL"
+            ;;
+        *)
+            [ -z "$PROXY_PORT" ] && PROXY_PORT="80"
+            STUNNEL_CONNECT="$PROXY:$PROXY_PORT"
+            ;;
+    esac
 else
     STUNNEL_CONNECT="$HOST:443"
     PROXY=""
     PROXY_PORT=""
 fi
 
-if [ "$TLS_TYPE" = "TLS" ]; then
-    cat > /usr/share/passwall-ssh/stunnel.conf <<EOF
+PROXY_PORT_CHECK=$(echo "$STUNNEL_CONNECT" | cut -d':' -f2)
+PROXY_HOST_CHECK=$(echo "$STUNNEL_CONNECT" | cut -d':' -f1)
+
+if [ "$TLS_TYPE" = "TLS" ] && [ "$PROXY_PORT_CHECK" != "443" ] && [ -n "$PROXY_PORT_CHECK" ]; then
+    > /usr/share/passwall-ssh/stunnel.conf
+    TRANSPORT="TCP"
+    PROXY="$PROXY_HOST_CHECK"
+    PROXY_PORT="$PROXY_PORT_CHECK"
+else
+    if [ "$TLS_TYPE" = "TLS" ]; then
+        cat > /usr/share/passwall-ssh/stunnel.conf <<EOF
 setuid = nobody
 setgid = nogroup
 foreground = yes
@@ -53,11 +73,11 @@ accept = 127.0.0.1:4444
 connect = $STUNNEL_CONNECT
 sni = $SNI
 EOF
-    
-    TRANSPORT="TLS"
-else
-    > /usr/share/passwall-ssh/stunnel.conf
-    TRANSPORT="TCP"
+        TRANSPORT="TLS"
+    else
+        > /usr/share/passwall-ssh/stunnel.conf
+        TRANSPORT="TCP"
+    fi
 fi
 
 printf '%s' "$PAYLOAD_PY" |
@@ -75,7 +95,6 @@ else
     [ "$DNS_SERVER" = "manual" ] && DNS_SERVER=$(uci -q get passwall-ssh.main.dns_manual)
 fi
 
-# GUNAKAN $ALIAS_NAME SEBAGAI PROFILE_NAME
 cat >/usr/share/passwall-ssh/passwall-ssh.env <<EOF
 PROFILE_NAME='$ALIAS_NAME'
 TRANSPORT='$TRANSPORT'
