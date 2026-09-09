@@ -1,4 +1,4 @@
-name: Build Passwall-SSH TEST
+name: Build Passwall-SSH Test
 
 on:
   workflow_dispatch:
