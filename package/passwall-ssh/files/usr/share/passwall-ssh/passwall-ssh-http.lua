@@ -32,7 +32,7 @@ local function log_payload(title, payload)
 end
 
 -- ==========================================
--- 2. ENVIRONMENT & ROUTING
+-- 2. ENVIRONMENT & ROUTING (FIXED FOR PROXY + TLS)
 -- ==========================================
 local ENV_FILE = "/usr/share/passwall-ssh/passwall-ssh.env"
 local function load_env(path)
@@ -55,10 +55,15 @@ local LISTEN_HOST = "127.0.0.1"
 local LISTEN_PORT = tonumber(ENV.LISTEN_PORT) or 8080
 local REMOTE_HOST, REMOTE_PORT
 
+-- [PERBAIKAN UNIVERSAL]: Deteksi Proxy meskipun dalam mode TLS/Stunnel
 if ENV.TRANSPORT == "TLS" then
     REMOTE_HOST = "127.0.0.1"
     REMOTE_PORT = tonumber(ENV.STUNNEL_PORT) or 4444
-    log("Mode: TLS/SNI via Stunnel")
+    if ENV.PROXY and ENV.PROXY ~= "" then
+        log("Mode: TLS/SNI via Stunnel + HTTP Proxy -> " .. tostring(ENV.PROXY))
+    else
+        log("Mode: TLS/SNI via Stunnel (Direct)")
+    end
 else
     if ENV.PROXY and ENV.PROXY ~= "" then
         REMOTE_HOST = ENV.PROXY
@@ -470,13 +475,11 @@ while true do
                             if not sess.tunnel_established then
                                 sess.http_buffer = (sess.http_buffer or "") .. chunk
                                 
-                                -- [PERBAIKAN BUG TIMEOUT]: Cek apakah server membalas dengan format HTTP
                                 if #sess.http_buffer >= 5 and not sess.http_buffer:match("^HTTP/") then
                                     sess.tunnel_established = true
                                     queue_send(sess.client, sess.http_buffer)
                                     sess.http_buffer = ""
                                 else
-                                    -- Jalankan parsing ketat jika memang ini balasan HTTP
                                     while true do
                                         local e_pos = sess.http_buffer:find("\r\n\r\n")
                                         local e_len = 4
