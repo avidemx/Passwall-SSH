@@ -264,6 +264,8 @@ header_ui.cfgvalue = function()
         <div id="log-container" style="display: none;">
             <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 13px;">
                 <button type="button" class="cbi-button cbi-button-remove" onclick="clearLog()" style="padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;">Clear Logs</button>
+                <!-- Tambahan Tombol Copy -->
+                <button type="button" id="btn-copy-log" class="cbi-button cbi-button-apply" onclick="copyLog()" style="padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;">Copy Logs</button>
             </div>
             <div id="log_box"></div>
         </div>
@@ -632,6 +634,55 @@ header_ui.cfgvalue = function()
                 }
             };
             xhr.send();
+        };
+
+        window.copyLog = function() {
+            var box = document.getElementById('log_box');
+            var btn = document.getElementById('btn-copy-log');
+            if (!box || !btn) return;
+            
+            var textToCopy = box.innerText; 
+            
+            var showSuccess = function() {
+                var originalText = btn.innerText;
+                btn.innerText = "Copied!";
+                btn.style.backgroundColor = "#28a745"; // Warna hijau
+                btn.style.color = "#fff";
+                setTimeout(function() {
+                    btn.innerText = originalText;
+                    btn.style.backgroundColor = "";
+                    btn.style.color = "";
+                }, 2000);
+            };
+
+            // Modern Clipboard API (Jika HTTPS)
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(textToCopy).then(showSuccess).catch(function(err) {
+                    console.error("Gagal menyalin: ", err);
+                });
+            } else {
+                // Fallback (Untuk HTTP LuCI)
+                var textArea = document.createElement("textarea");
+                textArea.value = textToCopy;
+                // Sembunyikan textarea 
+                textArea.style.position = "fixed";
+                textArea.style.top = "-9999px";
+                textArea.style.left = "-9999px";
+                document.body.appendChild(textArea);
+                
+                textArea.focus();
+                textArea.select();
+                
+                try {
+                    var successful = document.execCommand('copy');
+                    if (successful) showSuccess();
+                } catch (err) {
+                    console.error('Browser tidak mendukung copy otomatis', err);
+                    alert("Gagal menyalin log.");
+                }
+                
+                document.body.removeChild(textArea);
+            }
         };
     
         document.addEventListener('DOMContentLoaded', function() {
