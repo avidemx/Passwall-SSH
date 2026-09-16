@@ -55,7 +55,6 @@ local LISTEN_HOST = "127.0.0.1"
 local LISTEN_PORT = tonumber(ENV.LISTEN_PORT) or 8080
 local REMOTE_HOST, REMOTE_PORT
 
--- [PERBAIKAN UNIVERSAL]: Deteksi Proxy meskipun dalam mode TLS/Stunnel
 if ENV.TRANSPORT == "TLS" then
     REMOTE_HOST = "127.0.0.1"
     REMOTE_PORT = tonumber(ENV.STUNNEL_PORT) or 4444
@@ -286,10 +285,11 @@ local function cleanup(sess)
     end
 end
 
+-- [PERBAIKAN]: Menggunakan Table Array untuk Queue agar ringan di RAM & CPU
 local function queue_send(sock, data)
     if not sock or not data or data == "" then return end
-    if not write_buffers[sock] then write_buffers[sock] = "" end
-    write_buffers[sock] = write_buffers[sock] .. data
+    if not write_buffers[sock] then write_buffers[sock] = {} end
+    table.insert(write_buffers[sock], data)
     set_wants_write(sock, true)
 end
 
@@ -351,18 +351,29 @@ while true do
     if writable then
         for _, sock in ipairs(writable) do
             local sess = session_pairs[sock]
+            
+            -- [PERBAIKAN]: Eksekusi Send via Array (Tidak ada lagi string .. string)
             if sess and not sess.closed and write_buffers[sock] and #write_buffers[sock] > 0 then
-                local sent, err_send, last = sock:send(write_buffers[sock])
+                local chunk = write_buffers[sock][1]
+                local sent, err_send, last = sock:send(chunk)
+                
                 if sent then
-                    write_buffers[sock] = write_buffers[sock]:sub(sent + 1)
+                    if sent == #chunk then
+                        table.remove(write_buffers[sock], 1)
+                    else
+                        write_buffers[sock][1] = chunk:sub(sent + 1)
+                    end
                 elseif err_send == "timeout" then
-                    if last and last > 0 then write_buffers[sock] = write_buffers[sock]:sub(last + 1) end
+                    if last and last > 0 then 
+                        write_buffers[sock][1] = chunk:sub(last + 1) 
+                    end
                 else
                     cleanup(sess)
                 end
             end
+            
             if sess and not sess.closed then
-                if not write_buffers[sock] or write_buffers[sock] == "" then
+                if not write_buffers[sock] or #write_buffers[sock] == 0 then
                     set_wants_write(sock, false)
                 end
             end
@@ -401,7 +412,7 @@ while true do
                     
                     if sock == sess.client then
                         if sess.out_state == "INIT" then
-                            local data, err_recv, partial = sock:receive(8192)
+                            local data, err_recv, partial = sock:receive(65536)
                             local chunk = data or partial or ""
 
                             if #chunk > 0 then
@@ -444,18 +455,17 @@ while true do
                                 if err_recv == "closed" then cleanup(sess) end
                             end
                         else
-                            local data, err_recv, partial = sock:receive(8192)
+                            local data, err_recv, partial = sock:receive(65536)
                             local chunk = data or partial or ""
                             if #chunk > 0 then queue_send(sess.remote, chunk) end
                             if err_recv == "closed" then cleanup(sess) end
                         end
 
                     elseif sock == sess.remote then
-                        local data, err_recv, partial = sock:receive(8192)
+                        local data, err_recv, partial = sock:receive(65536)
                         local chunk = data or partial or ""
                         
                         if #chunk > 0 then
-                            
                             -- 1. SMART PEEK
                             sess.peek_buffer = (sess.peek_buffer or "") .. chunk
                             if sess.peek_buffer:find("\n") then
