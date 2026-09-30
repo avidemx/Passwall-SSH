@@ -412,7 +412,7 @@ while true do
                     
                     if sock == sess.client then
                         if sess.out_state == "INIT" then
-                            local data, err_recv, partial = sock:receive(65536)
+                            local data, err_recv, partial = sock:receive(16384)
                             local chunk = data or partial or ""
 
                             if #chunk > 0 then
@@ -455,14 +455,14 @@ while true do
                                 if err_recv == "closed" then cleanup(sess) end
                             end
                         else
-                            local data, err_recv, partial = sock:receive(65536)
+                            local data, err_recv, partial = sock:receive(16384)
                             local chunk = data or partial or ""
                             if #chunk > 0 then queue_send(sess.remote, chunk) end
                             if err_recv == "closed" then cleanup(sess) end
                         end
 
                     elseif sock == sess.remote then
-                        local data, err_recv, partial = sock:receive(65536)
+                        local data, err_recv, partial = sock:receive(16384)
                         local chunk = data or partial or ""
                         
                         if #chunk > 0 then
