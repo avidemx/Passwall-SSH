@@ -1,0 +1,8 @@
+config slowdns 'SlowDNS'
+	option enabled '0'
+	option DNS_UDP_IP '1.1.1.1'
+	option Type_DNS 'NS'
+	option DNSTT_DOMAIN 'xxx'
+	option DNSTT_SERVER_PUBLIC_KEY 'xxx'
+	option SSH_USERNAME 'xxx'
+	option SSH_PASSWORD 'xxx'
