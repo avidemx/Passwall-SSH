@@ -6,6 +6,7 @@ STOP=10
 LOG="/tmp/etc/passwall-ssh.log"
 STATE_FILE="/tmp/etc/passwall-ssh.state"
 ENV_FILE="/usr/share/passwall-ssh/passwall-ssh.env"
+SLOWDNS_SUPERVISOR_PID="/var/run/passwall-ssh-slowdns.pid"
 LOCK="/var/run/passwall-ssh.control.lock"
 
 acquire_lock() {
@@ -29,7 +30,27 @@ write_log() {
     echo "<span color=\"#3C86AB\">[$(date '+%Y-%m-%d %H:%M:%S')] $*</span>" >> "$LOG"
 }
 
+
+_stop_slowdns() {
+    if [ -f "$SLOWDNS_SUPERVISOR_PID" ]; then
+        _slowdns_pid=$(cat "$SLOWDNS_SUPERVISOR_PID" 2>/dev/null)
+        if [ -n "$_slowdns_pid" ] && kill -0 "$_slowdns_pid" 2>/dev/null; then
+            kill -TERM "$_slowdns_pid" 2>/dev/null
+            _slowdns_wait=0
+            while kill -0 "$_slowdns_pid" 2>/dev/null && [ "$_slowdns_wait" -lt 20 ]; do
+                sleep 1
+                _slowdns_wait=$((_slowdns_wait + 1))
+            done
+            if kill -0 "$_slowdns_pid" 2>/dev/null; then
+                kill -9 "$_slowdns_pid" 2>/dev/null
+            fi
+        fi
+        rm -f "$SLOWDNS_SUPERVISOR_PID"
+    fi
+}
+
 _stop() {
+    _stop_slowdns
     echo "STOPPING" > "$STATE_FILE"
 
     # Kill Watchdog & Client scripts
@@ -46,8 +67,11 @@ _stop() {
         mv /tmp/state/passwall-ssh/current_conn /usr/share/passwall-ssh/last_conn
     fi
 
-    # Kill Firewall & Rules
-    sh /usr/share/passwall-ssh/passwall-ssh.sh stop >/dev/null 2>&1
+    # Bersihkan routing SSH lama hanya bila PID file core lama memang ada.
+    # SlowDNS memakai supervisor dan routing terpisah.
+    if [ -f /var/run/passwall-ssh-tun2socks.pid ] || [ -f /var/run/pw_dnsproxy.pid ]; then
+        sh /usr/share/passwall-ssh/passwall-ssh.sh stop >/dev/null 2>&1
+    fi
 
     # Kill SSH Clients, autossh, sshpass, dan nc (netcat)
     if [ -f /var/run/passwall-ssh-client.pid ]; then
@@ -80,7 +104,15 @@ _stop() {
 }
 
 _start() {
-    ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    MODE=$(uci -q get passwall-ssh.main.transport_mode 2>/dev/null)
+    [ -z "$MODE" ] && MODE="ssh"
+
+    if [ "$MODE" = "slowdns" ]; then
+        ENABLE=$(uci -q get passwall-ssh-slowdns.SlowDNS.enabled 2>/dev/null)
+    else
+        ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    fi
+
     if [ "$ENABLE" != "1" ]; then
         _stop
         return 0
@@ -97,6 +129,18 @@ _start() {
         rm -f /tmp/etc/passwall-ssh.is_retry
     else
         rm -f /tmp/etc/passwall-ssh.retry
+    fi
+
+    if [ "$MODE" = "slowdns" ]; then
+        if ! sh /usr/share/passwall-ssh/passwall-ssh-slowdns-apply.sh; then
+            write_log "SlowDNS configuration invalid. Check /etc/config/passwall-ssh-slowdns."
+            echo "ERROR" > "$STATE_FILE"
+            return 1
+        fi
+
+        /usr/share/passwall-ssh/passwall-ssh-slowdns-supervisor.sh &
+        echo $! > "$SLOWDNS_SUPERVISOR_PID"
+        return 0
     fi
 
     sh /usr/share/passwall-ssh/passwall-ssh-apply.sh || return 1
@@ -147,7 +191,15 @@ reload() {
 }
 
 boot() {
-    ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    MODE=$(uci -q get passwall-ssh.main.transport_mode 2>/dev/null)
+    [ -z "$MODE" ] && MODE="ssh"
+
+    if [ "$MODE" = "slowdns" ]; then
+        ENABLE=$(uci -q get passwall-ssh-slowdns.SlowDNS.enabled 2>/dev/null)
+    else
+        ENABLE=$(uci -q get passwall-ssh.main.enabled 2>/dev/null)
+    fi
+
     if [ "$ENABLE" = "1" ]; then
         start
     else
