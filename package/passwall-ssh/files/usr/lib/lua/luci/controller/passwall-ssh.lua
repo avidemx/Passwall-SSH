@@ -1,7 +1,10 @@
 module("luci.controller.passwall-ssh", package.seeall)
 
 function index()
-    entry({"admin", "services", "passwall-ssh"}, cbi("passwall-ssh/main"), "Passwall-SSH", 60)
+    entry({"admin", "services", "passwall-ssh"}, cbi("passwall-ssh/main", {
+        hideapplybtn = true,
+        hidesavebtn = true
+    }), "Passwall-SSH", 60)
     entry({"admin", "services", "passwall-ssh", "edit"}, cbi("passwall-ssh/edit"), nil).leaf = true
     entry({"admin", "services", "passwall-ssh", "check_ip"}, call("action_check_ip")).leaf = true
     entry({"admin", "services", "passwall-ssh", "check_conn"}, call("action_check_conn"))
@@ -330,6 +333,8 @@ function action_check_services()
 
     sys.exec("mkdir -p /tmp/state/passwall-ssh")
     local core = sys.call("pidof badvpn-tun2socks >/dev/null 2>&1") == 0 and "1" or "0"
+    local service_state = read_file("/tmp/etc/passwall-ssh.state")
+    if service_state == "" then service_state = "STOPPED" end
     local iface = "tun0"
     local rx = "0"
     local tx = "0"
@@ -384,7 +389,7 @@ function action_check_services()
     if last_conn == "" then last_conn = "0" end
 
     luci.http.prepare_content("text/plain")
-    luci.http.write(core .. ",0,0," .. active_profile .. "," .. rx .. "," .. tx .. "," .. start_time .. "," .. last_conn .. "," .. last_rx .. "," .. last_tx)
+    luci.http.write(core .. ",0,0," .. active_profile .. "," .. rx .. "," .. tx .. "," .. start_time .. "," .. last_conn .. "," .. last_rx .. "," .. last_tx .. "," .. service_state)
 end
 
 function action_check_conn()
