@@ -22,6 +22,7 @@ endef
 
 define Package/passwall-ssh/conffiles
 /etc/config/passwall-ssh
+/etc/config/passwall-ssh-slowdns
 endef
 
 define Build/Compile
