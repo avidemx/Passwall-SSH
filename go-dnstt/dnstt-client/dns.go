@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"www.bamsoftware.com/git/dnstt.git/dns"
@@ -16,6 +18,9 @@ import (
 )
 
 const (
+	autoHandshakeReplayLimit = 4
+	autoHandshakeReplayQueue = 32
+
 	// How many bytes of random padding to insert into queries.
 	numPadding = 3
 	// In an otherwise empty polling query, insert even more random padding,
@@ -23,20 +28,22 @@ const (
 	// because the prefix codes indicating padding start at 224.
 	numPaddingForPoll = 8
 
-	// sendLoop has a poll timer that automatically sends an empty polling
-	// query when a certain amount of time has elapsed without a send. The
-	// poll timer is initially set to initPollDelay. It increases by a
-	// factor of pollDelayMultiplier every time the poll timer expires, up
-	// to a maximum of maxPollDelay. The poll timer is reset to
-	// initPollDelay whenever an a send occurs that is not the result of the
-	// poll timer expiring.
-	initPollDelay       = 500 * time.Millisecond
-	maxPollDelay        = 10 * time.Second
-	pollDelayMultiplier = 2.0
+	// sendLoop sends an empty polling query after a period without a send.
+	// Standard DNSTT starts at initPollDelay; HTTP Custom starts at
+	// httpCustomInitPollDelay. The interval doubles on timeout, up to
+	// maxPollDelay for standard DNSTT or httpCustomMaxPollDelay for HTTP Custom.
+	// Sending data or an immediate poll resets it to the mode's initial delay.
+	initPollDelay                   = 500 * time.Millisecond
+	httpCustomInitPollDelay         = 125 * time.Millisecond
+	maxPollDelay                    = 10 * time.Second
+	httpCustomMaxPollDelay = 1 * time.Second
+	pollDelayMultiplier              = 2.0
 
 	// A limit on the number of empty poll requests we may send in a burst
 	// as a result of receiving data.
 	pollLimit = 16
+
+	httpCustomAutoProbeInterval = 2 * time.Second
 )
 
 // base32Encoding is a base32 encoding without padding.
@@ -56,12 +63,27 @@ var base32Encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 // responses are vehicles for carrying data and for our purposes don't need to
 // be correlated. When sending a query, we generate a random ID, and when
 // receiving a response, we ignore the ID.
+type httpCustomReplayPacket struct {
+	packet []byte
+	qtype  uint16
+}
+
 type DNSPacketConn struct {
 	clientID   turbotunnel.ClientID
 	domain     dns.Name
-	httpCustom         bool
-	qtype              uint16
-	httpCustomSendCount uint64
+	httpCustom           bool
+	qtype                uint16
+	autoQType            bool
+	autoQTypeCurrent     atomic.Uint32
+	autoQTypeConv        atomic.Uint32
+	autoQTypeConvSet     atomic.Bool
+	autoQTypeMu          sync.Mutex
+	autoQTypeLocked      bool
+	autoHandshakePackets [][]byte
+	autoReplayChan       chan httpCustomReplayPacket
+	autoQTypeStop        chan struct{}
+	autoQTypeStopOnce    sync.Once
+	httpCustomSendCount  uint64
 	httpCustomRecvCount uint64
 	// Sending on pollChan permits sendLoop to send an empty polling query.
 	// sendLoop also does its own polling according to a time schedule.
@@ -76,28 +98,49 @@ type DNSPacketConn struct {
 // and ReadFrom methods, handles the actual sending and receiving the DNS
 // messages encoded by DNSPacketConn. addr is the address to be passed to
 // transport.WriteTo whenever a message needs to be sent.
+const defaultHTTPcustomQueueSize = 512
+
 func NewDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name) *DNSPacketConn {
-	return newDNSPacketConn(transport, addr, domain, false, dns.RRTypeTXT)
+	return newDNSPacketConn(transport, addr, domain, false, dns.RRTypeTXT, turbotunnel.QueueSize)
 }
 
 // NewHTTPcustomDNSPacketConn creates a DNSPacketConn using HTTP Custom SlowDNS
-// framing and the selected DNS resource-record carrier. The underlying KCP,
-// Noise NK, and smux stack remains the standard DNSTT client stack.
+// framing and the selected DNS resource-record carrier. A qtype of zero enables
+// automatic RR probing. The KCP, Noise NK, and smux stack remains unchanged.
 func NewHTTPcustomDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name, qtype uint16) *DNSPacketConn {
-	return newDNSPacketConn(transport, addr, domain, true, qtype)
+	return NewHTTPcustomDNSPacketConnWithQueueSize(transport, addr, domain, qtype, defaultHTTPcustomQueueSize)
 }
 
-func newDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name, httpCustom bool, qtype uint16) *DNSPacketConn {
+// NewHTTPcustomDNSPacketConnWithQueueSize sizes both packet queues for the
+// selected KCP window. The standard DNSTT constructor keeps its upstream size.
+func NewHTTPcustomDNSPacketConnWithQueueSize(transport net.PacketConn, addr net.Addr, domain dns.Name, qtype uint16, queueSize int) *DNSPacketConn {
+	return newDNSPacketConn(transport, addr, domain, true, qtype, queueSize)
+}
+
+func newDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name, httpCustom bool, qtype uint16, queueSize int) *DNSPacketConn {
 	// ClientID is the stable 8-byte session prefix in the QNAME for both
 	// standard DNSTT and native HTTP Custom-compatible framing.
 	clientID := turbotunnel.NewClientID()
+	autoQType := httpCustom && qtype == 0
+	if autoQType {
+		qtype = httpCustomAutoQTypes[0]
+	}
 	c := &DNSPacketConn{
 		clientID:        clientID,
 		domain:          domain,
-		httpCustom:                 httpCustom,
-		qtype:                      qtype,
+		httpCustom:      httpCustom,
+		qtype:           qtype,
+		autoQType:       autoQType,
 		pollChan:        make(chan struct{}, pollLimit),
-		QueuePacketConn: turbotunnel.NewQueuePacketConn(clientID, 0),
+		QueuePacketConn: turbotunnel.NewQueuePacketConnWithQueueSize(clientID, 0, queueSize),
+	}
+	if autoQType {
+		c.autoQTypeCurrent.Store(uint32(qtype))
+		c.autoReplayChan = make(chan httpCustomReplayPacket, autoHandshakeReplayQueue)
+		c.autoQTypeStop = make(chan struct{})
+		log.Printf("HTTPCustom AUTO enabled; probing NS, TXT, CNAME, SRV, MX, NULL every %s",
+			httpCustomAutoProbeInterval)
+		go c.autoHTTPcustomQTypeLoop()
 	}
 	go func() {
 		err := c.recvLoop(transport)
@@ -113,6 +156,153 @@ func newDNSPacketConn(transport net.PacketConn, addr net.Addr, domain dns.Name, 
 	}()
 	return c
 }
+
+func (c *DNSPacketConn) currentHTTPcustomQType() uint16 {
+	if c.autoQType {
+		return uint16(c.autoQTypeCurrent.Load())
+	}
+	return c.qtype
+}
+
+func (c *DNSPacketConn) initialPollDelay() time.Duration {
+	if c.httpCustom {
+		return httpCustomInitPollDelay
+	}
+	return initPollDelay
+}
+
+func (c *DNSPacketConn) pollDelayCeiling() time.Duration {
+	if c.httpCustom {
+		return httpCustomMaxPollDelay
+	}
+	return maxPollDelay
+}
+
+func (c *DNSPacketConn) SetHTTPcustomAutoKCPConv(conv uint32) {
+	if c.autoQType {
+		c.autoQTypeConv.Store(conv)
+		c.autoQTypeConvSet.Store(true)
+	}
+}
+
+func (c *DNSPacketConn) stopHTTPcustomAutoProbe() {
+	if c.autoQType && c.autoQTypeStop != nil {
+		c.autoQTypeStopOnce.Do(func() {
+			close(c.autoQTypeStop)
+		})
+	}
+}
+
+func (c *DNSPacketConn) StopHTTPcustomAutoQType() {
+	c.stopHTTPcustomAutoProbe()
+}
+
+// rememberHTTPcustomAutoHandshakePacket retains a small number of the first
+// outbound KCP PUSH datagrams while Auto is negotiating. Exact datagram bytes
+// are preserved so a later QTYPE can retransmit the original Noise handshake.
+func (c *DNSPacketConn) rememberHTTPcustomAutoHandshakePacket(packet []byte) {
+	if !c.autoQType || len(packet) == 0 || !c.autoQTypeConvSet.Load() ||
+		!httpCustomHasKCPPush(packet, c.autoQTypeConv.Load()) {
+		return
+	}
+	c.autoQTypeMu.Lock()
+	defer c.autoQTypeMu.Unlock()
+	if c.autoQTypeLocked || len(c.autoHandshakePackets) >= autoHandshakeReplayLimit {
+		return
+	}
+	for _, cached := range c.autoHandshakePackets {
+		if bytes.Equal(cached, packet) {
+			return
+		}
+	}
+	copyPacket := append([]byte(nil), packet...)
+	c.autoHandshakePackets = append(c.autoHandshakePackets, copyPacket)
+}
+
+// sendHTTPcustomAutoReplay serializes the replay with Auto locking. A replay
+// queued for an old candidate is discarded; no handshake packet is sent after
+// a matching server KCP PUSH has locked the carrier.
+func (c *DNSPacketConn) sendHTTPcustomAutoReplay(transport net.PacketConn, replay httpCustomReplayPacket, addr net.Addr) error {
+	c.autoQTypeMu.Lock()
+	defer c.autoQTypeMu.Unlock()
+	if c.autoQTypeLocked || uint16(c.autoQTypeCurrent.Load()) != replay.qtype {
+		return nil
+	}
+	return c.sendHTTPcustomWithQType(transport, replay.packet, addr, replay.qtype)
+}
+
+func (c *DNSPacketConn) lockHTTPcustomAutoQType(qtype uint16) bool {
+	if !c.autoQType || !isHTTPcustomQType(qtype) {
+		return false
+	}
+	c.autoQTypeMu.Lock()
+	if c.autoQTypeLocked {
+		c.autoQTypeMu.Unlock()
+		return false
+	}
+	c.autoQTypeCurrent.Store(uint32(qtype))
+	c.autoQTypeLocked = true
+	c.autoHandshakePackets = nil
+	c.autoQTypeMu.Unlock()
+	c.stopHTTPcustomAutoProbe()
+	log.Printf("HTTPCustom AUTO selected QTYPE=%s after matching KCP PUSH", httpCustomQTypeName(qtype))
+	return true
+}
+
+func (c *DNSPacketConn) advanceHTTPcustomAutoQType() (uint16, bool) {
+	c.autoQTypeMu.Lock()
+	if c.autoQTypeLocked {
+		current := uint16(c.autoQTypeCurrent.Load())
+		c.autoQTypeMu.Unlock()
+		return current, false
+	}
+	next := nextHTTPcustomQType(uint16(c.autoQTypeCurrent.Load()))
+	c.autoQTypeCurrent.Store(uint32(next))
+	cached := make([][]byte, len(c.autoHandshakePackets))
+	for i, packet := range c.autoHandshakePackets {
+		cached[i] = append([]byte(nil), packet...)
+	}
+	c.autoQTypeMu.Unlock()
+
+	// Replay the initial KCP PUSH datagrams using this candidate QTYPE.
+	// The send loop remains the only network writer. If no handshake packet
+	// has been captured yet, retain the original empty-probe behavior.
+	queued := 0
+	for _, packet := range cached {
+		select {
+		case c.autoReplayChan <- httpCustomReplayPacket{packet: packet, qtype: next}:
+			queued++
+		default:
+			log.Printf("HTTPCustom AUTO replay queue full; skipped one handshake packet")
+		}
+	}
+	if queued == 0 {
+		select {
+		case c.pollChan <- struct{}{}:
+		default:
+		}
+	} else {
+		log.Printf("HTTPCustom AUTO replaying %d initial KCP packet(s) with QTYPE=%s", queued, httpCustomQTypeName(next))
+	}
+	log.Printf("HTTPCustom AUTO probing QTYPE=%s", httpCustomQTypeName(next))
+	return next, true
+}
+
+func (c *DNSPacketConn) autoHTTPcustomQTypeLoop() {
+	ticker := time.NewTicker(httpCustomAutoProbeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.autoQTypeStop:
+			return
+		case <-ticker.C:
+			if _, ok := c.advanceHTTPcustomAutoQType(); !ok {
+				return
+			}
+		}
+	}
+}
+
 // dnsResponsePayload extracts the downstream payload of a DNS response, encoded
 // into the RDATA of a TXT RR. It returns nil if the message doesn't pass format
 // checks, or if the name in its Question entry is not a subdomain of domain.
@@ -219,8 +409,12 @@ func (c *DNSPacketConn) recvLoop(transport net.PacketConn) error {
 		}
 
 		var payload []byte
+		responseQType := c.currentHTTPcustomQType()
+		if c.autoQType {
+			responseQType = httpCustomResponseQType(&resp, responseQType)
+		}
 		if c.httpCustom {
-			payload = decodeHTTPcustomAnswer(buf[:n], &resp, c.domain, c.qtype)
+			payload = decodeHTTPcustomAnswer(buf[:n], &resp, c.domain, responseQType)
 			c.httpCustomRecvCount++
 			count := c.httpCustomRecvCount
 			if count <= 30 || count%50 == 0 {
@@ -228,8 +422,8 @@ func (c *DNSPacketConn) recvLoop(transport net.PacketConn) error {
 				if len(resp.Question) > 0 {
 					qname = resp.Question[0].Name.String()
 				}
-				log.Printf("HTTPCustom RX #%d id=%04x flags=%04x rcode=%d q=%s answers=%d authority=%d additional=%d decoded=%dB",
-					count, resp.ID, resp.Flags, resp.Rcode(), qname, len(resp.Answer), len(resp.Authority), len(resp.Additional), len(payload))
+				log.Printf("HTTPCustom RX #%d id=%04x flags=%04x rcode=%d qtype=%s(%d) q=%s answers=%d authority=%d additional=%d decoded=%dB",
+					count, resp.ID, resp.Flags, resp.Rcode(), httpCustomQTypeName(responseQType), responseQType, qname, len(resp.Answer), len(resp.Authority), len(resp.Additional), len(payload))
 				for i, rr := range resp.Answer {
 					rdata := rr.Data
 					if len(rdata) > 64 {
@@ -252,6 +446,10 @@ func (c *DNSPacketConn) recvLoop(transport net.PacketConn) error {
 				break
 			}
 			any = true
+			if c.httpCustom && c.autoQType && c.autoQTypeConvSet.Load() &&
+				httpCustomHasKCPPush(p, c.autoQTypeConv.Load()) {
+				c.lockHTTPcustomAutoQType(responseQType)
+			}
 			if c.httpCustom && c.httpCustomRecvCount <= 30 {
 				logHTTPcustomKCP("RX", p)
 			}
@@ -395,22 +593,46 @@ func (c *DNSPacketConn) send(transport net.PacketConn, p []byte, addr net.Addr) 
 // on the network using send. It also does polling with empty packets when
 // requested by pollChan or after a timeout.
 func (c *DNSPacketConn) sendLoop(transport net.PacketConn, addr net.Addr) error {
-	pollDelay := initPollDelay
+	pollDelay := c.initialPollDelay()
 	pollTimer := time.NewTimer(pollDelay)
+	var lastIncomingDrops, lastOutgoingDrops uint64
 	for {
 		var p []byte
+		var replayQType uint16
+		isReplay := false
 		outgoing := c.QueuePacketConn.OutgoingQueue(addr)
 		pollTimerExpired := false
-		// Prioritize sending an actual data packet from outgoing. Only
-		// consider a poll when outgoing is empty.
+
+		// Replay packets have priority over fresh KCP output and empty polls.
 		select {
-		case p = <-outgoing:
+		case replay := <-c.autoReplayChan:
+			p = replay.packet
+			replayQType = replay.qtype
+			isReplay = true
 		default:
+		}
+		if !isReplay {
 			select {
-			case p = <-outgoing:
-			case <-c.pollChan:
-			case <-pollTimer.C:
-				pollTimerExpired = true
+			case replay := <-c.autoReplayChan:
+				p = replay.packet
+				replayQType = replay.qtype
+				isReplay = true
+			default:
+				// Prioritize fresh KCP data over an empty poll.
+				select {
+				case p = <-outgoing:
+				default:
+					select {
+					case replay := <-c.autoReplayChan:
+						p = replay.packet
+						replayQType = replay.qtype
+						isReplay = true
+					case p = <-outgoing:
+					case <-c.pollChan:
+					case <-pollTimer.C:
+						pollTimerExpired = true
+					}
+				}
 			}
 		}
 
@@ -427,27 +649,38 @@ func (c *DNSPacketConn) sendLoop(transport net.PacketConn, addr net.Addr) error 
 			// We're polling because it's been a while since we last
 			// polled. Increase the poll delay.
 			pollDelay = time.Duration(float64(pollDelay) * pollDelayMultiplier)
-			if pollDelay > maxPollDelay {
-				pollDelay = maxPollDelay
+			maxDelay := c.pollDelayCeiling()
+			if pollDelay > maxDelay {
+				pollDelay = maxDelay
 			}
 		} else {
 			// We're sending an actual data packet, or we're polling
 			// in response to a received packet. Reset the poll
 			// delay to initial.
 			if !pollTimer.Stop() {
-				<-pollTimer.C
-			}
-			pollDelay = initPollDelay
+	            <-pollTimer.C:
+            }
+			pollDelay = c.initialPollDelay()
 		}
 		pollTimer.Reset(pollDelay)
 
 		// Unlike in the server, in the client we assume that because
 		// the data capacity of queries is so limited, it's not worth
 		// trying to send more than one packet per query.
-		err := c.send(transport, p, addr)
+		var err error
+		if isReplay {
+			err = c.sendHTTPcustomAutoReplay(transport, httpCustomReplayPacket{packet: p, qtype: replayQType}, addr)
+		} else {
+			c.rememberHTTPcustomAutoHandshakePacket(p)
+			err = c.send(transport, p, addr)
+		}
 		if err != nil {
 			log.Printf("send: %v", err)
-			continue
+		}
+		incomingDrops, outgoingDrops := c.QueueDropCounts()
+		if incomingDrops != lastIncomingDrops || outgoingDrops != lastOutgoingDrops {
+			log.Printf("DNSTT packet queue drops: incoming=%d outgoing=%d", incomingDrops, outgoingDrops)
+			lastIncomingDrops, lastOutgoingDrops = incomingDrops, outgoingDrops
 		}
 	}
 }

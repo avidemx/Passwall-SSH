@@ -40,15 +40,26 @@ type QueuePacketConn struct {
 	closed    chan struct{}
 	// What error to return when the QueuePacketConn is closed.
 	err atomic.Value
+	// Queue overflow counters are kept separate so KCP packet loss caused by
+	// local queue pressure can be distinguished from network loss.
+	recvDrops atomic.Uint64
+	sendDrops atomic.Uint64
 }
 
 // NewQueuePacketConn makes a new QueuePacketConn, set to track recent peers
 // for at least a duration of timeout.
 func NewQueuePacketConn(localAddr net.Addr, timeout time.Duration) *QueuePacketConn {
+	return NewQueuePacketConnWithQueueSize(localAddr, timeout, QueueSize)
+}
+
+// NewQueuePacketConnWithQueueSize makes a QueuePacketConn with per-session
+// incoming and outgoing queues sized for the selected transport profile.
+func NewQueuePacketConnWithQueueSize(localAddr net.Addr, timeout time.Duration, queueSize int) *QueuePacketConn {
+	queueSize = normalizeQueueSize(queueSize)
 	return &QueuePacketConn{
-		remotes:   NewRemoteMap(timeout),
+		remotes:   NewRemoteMapWithQueueSize(timeout, queueSize),
 		localAddr: localAddr,
-		recvQueue: make(chan taggedPacket, QueueSize),
+		recvQueue: make(chan taggedPacket, queueSize),
 		closed:    make(chan struct{}),
 	}
 }
@@ -68,7 +79,9 @@ func (c *QueuePacketConn) QueueIncoming(p []byte, addr net.Addr) {
 	select {
 	case c.recvQueue <- taggedPacket{buf, addr}:
 	default:
-		// Drop the incoming packet if the receive queue is full.
+		// Match QueuePacketConn.WriteTo semantics: KCP treats this as packet
+		// loss and can retransmit; count it so local pressure is observable.
+		c.recvDrops.Add(1)
 	}
 }
 
@@ -123,9 +136,19 @@ func (c *QueuePacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	case c.remotes.SendQueue(addr) <- buf:
 		return len(buf), nil
 	default:
-		// Drop the outgoing packet if the send queue is full.
+		// Preserve the existing non-blocking packet-loss behavior so a full
+		// queue cannot stall KCP's output goroutine. The larger HTTP Custom
+		// queue reduces this case, and the counter makes any remaining drops
+		// visible to the DNSPacketConn send loop.
+		c.sendDrops.Add(1)
 		return len(buf), nil
 	}
+}
+
+// QueueDropCounts returns the number of packets dropped by the incoming and
+// outgoing queues, respectively.
+func (c *QueuePacketConn) QueueDropCounts() (incoming, outgoing uint64) {
+	return c.recvDrops.Load(), c.sendDrops.Load()
 }
 
 // closeWithError unblocks pending operations and makes future operations fail

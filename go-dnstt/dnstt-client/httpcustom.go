@@ -66,10 +66,12 @@ func logHTTPcustomKCP(direction string, packet []byte) {
 	}
 }
 
-// parseHTTPcustomQType parses the fixed HTTP Custom DNS resource-record mode.
-// Auto is deliberately not mapped to QTYPE 0; it requires authenticated probing.
+// parseHTTPcustomQType parses a fixed HTTP Custom RR carrier or the internal
+// Auto sentinel. Zero is never transmitted as a DNS QTYPE.
 func parseHTTPcustomQType(s string) (uint16, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "auto", "0":
+		return 0, nil
 	case "ns", "2":
 		return httpCustomQTypeNS, nil
 	case "cname", "5":
@@ -82,11 +84,95 @@ func parseHTTPcustomQType(s string) (uint16, error) {
 		return httpCustomQTypeTXT, nil
 	case "srv", "33":
 		return httpCustomQTypeSRV, nil
-	case "auto", "0":
-		return 0, fmt.Errorf("HTTP Custom Auto mode is not enabled yet; choose ns, cname, null, mx, txt, or srv")
 	default:
 		return 0, fmt.Errorf("unsupported HTTP Custom QTYPE %q", s)
 	}
+}
+
+var httpCustomAutoQTypes = []uint16{
+	httpCustomQTypeNS,
+	httpCustomQTypeTXT,
+	httpCustomQTypeCNAME,
+	httpCustomQTypeSRV,
+	httpCustomQTypeMX,
+	httpCustomQTypeNULL,
+}
+
+func httpCustomQTypeName(qtype uint16) string {
+	switch qtype {
+	case httpCustomQTypeNS:
+		return "NS"
+	case httpCustomQTypeCNAME:
+		return "CNAME"
+	case httpCustomQTypeNULL:
+		return "NULL"
+	case httpCustomQTypeMX:
+		return "MX"
+	case httpCustomQTypeTXT:
+		return "TXT"
+	case httpCustomQTypeSRV:
+		return "SRV"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", qtype)
+	}
+}
+
+func isHTTPcustomQType(qtype uint16) bool {
+	for _, candidate := range httpCustomAutoQTypes {
+		if candidate == qtype {
+			return true
+		}
+	}
+	return false
+}
+
+func nextHTTPcustomQType(current uint16) uint16 {
+	for i, candidate := range httpCustomAutoQTypes {
+		if candidate == current {
+			return httpCustomAutoQTypes[(i+1)%len(httpCustomAutoQTypes)]
+		}
+	}
+	return httpCustomAutoQTypes[0]
+}
+
+func httpCustomResponseQType(resp *dns.Message, fallback uint16) uint16 {
+	if resp != nil {
+		if len(resp.Question) > 0 && isHTTPcustomQType(resp.Question[0].Type) {
+			return resp.Question[0].Type
+		}
+		for _, answer := range resp.Answer {
+			if isHTTPcustomQType(answer.Type) {
+				return answer.Type
+			}
+		}
+	}
+	if isHTTPcustomQType(fallback) {
+		return fallback
+	}
+	return httpCustomAutoQTypes[0]
+}
+
+// Require a structurally valid KCP PUSH for the active conversation before
+// selecting an RR carrier. A packet from an unrelated conversation is ignored.
+func httpCustomHasKCPPush(packet []byte, expectedConv uint32) bool {
+	const headerSize = 24
+	for offset := 0; offset < len(packet); {
+		remaining := len(packet) - offset
+		if remaining < headerSize {
+			return false
+		}
+		segment := packet[offset:]
+		conv := binary.LittleEndian.Uint32(segment[0:4])
+		dataLen := binary.LittleEndian.Uint32(segment[20:24])
+		if uint64(dataLen) > uint64(remaining-headerSize) {
+			return false
+		}
+		if conv == expectedConv && segment[4] == 81 && dataLen > 0 {
+			return true
+		}
+		offset += headerSize + int(dataLen)
+	}
+	return false
 }
 
 // generateHTTPcustomDNSID creates a fresh DNS transaction ID independently
@@ -147,6 +233,10 @@ func encodeHTTPcustomQNAME(frame []byte, qtype uint16, domain dns.Name) (dns.Nam
 }
 
 func (c *DNSPacketConn) sendHTTPcustom(transport net.PacketConn, packet []byte, addr net.Addr) error {
+	return c.sendHTTPcustomWithQType(transport, packet, addr, c.currentHTTPcustomQType())
+}
+
+func (c *DNSPacketConn) sendHTTPcustomWithQType(transport net.PacketConn, packet []byte, addr net.Addr, qtype uint16) error {
 	paddingLen := numPadding
 	if len(packet) == 0 {
 		paddingLen = numPaddingForPoll
@@ -156,13 +246,12 @@ func (c *DNSPacketConn) sendHTTPcustom(transport net.PacketConn, packet []byte, 
 		return fmt.Errorf("generate HTTP Custom QNAME padding: %w", err)
 	}
 
-	logHTTPcustomKCP("TX", packet)
 	frame, err := encodeHTTPcustomFrame(c.clientID[:], packet, randomPadding)
 	if err != nil {
 		return err
 	}
 
-	qname, err := encodeHTTPcustomQNAME(frame, c.qtype, c.domain)
+	qname, err := encodeHTTPcustomQNAME(frame, qtype, c.domain)
 	if err != nil {
 		return fmt.Errorf("encode HTTP Custom QNAME: %w", err)
 	}
@@ -176,7 +265,7 @@ func (c *DNSPacketConn) sendHTTPcustom(transport net.PacketConn, packet []byte, 
 		Flags: 0x0100,
 		Question: []dns.Question{{
 			Name:  qname,
-			Type:  c.qtype,
+			Type:  qtype,
 			Class: dns.ClassIN,
 		}},
 		Additional: []dns.RR{{
@@ -195,9 +284,12 @@ func (c *DNSPacketConn) sendHTTPcustom(transport net.PacketConn, packet []byte, 
 	if err == nil {
 		c.httpCustomSendCount++
 		count := c.httpCustomSendCount
+		if count <= 30 {
+			logHTTPcustomKCP("TX", packet)
+		}
 		if count <= 30 || count%50 == 0 {
 			log.Printf("HTTPCustom TX #%d id=%04x id_source=independent-random client_id=%s marker=%02x padding=%x qtype=%d payload=%dB frame=%dB qname=%s dns=%dB",
-				count, id, c.clientID.String(), frame[8], randomPadding, c.qtype, len(packet), len(frame), qname.String(), len(wire))
+				count, id, c.clientID.String(), frame[8], randomPadding, qtype, len(packet), len(frame), qname.String(), len(wire))
 		}
 	}
 	return err
@@ -260,17 +352,23 @@ func decodeHTTPcustomNameCarrier(wire []byte, rr dns.RR, qtype uint16, domain dn
 	default:
 		return nil, fmt.Errorf("QTYPE %d is not a name carrier", qtype)
 	}
-	if len(rr.Data) <= skip {
+	if len(rr.Data) < skip+2 {
 		return nil, fmt.Errorf("name-carrier RDATA is too short")
 	}
+	if rr.RDataOffset < 12 || rr.RDataOffset > len(wire) || skip > len(wire)-rr.RDataOffset {
+		return nil, fmt.Errorf("invalid name-carrier RDataOffset %d (skip=%d, wire=%d)", rr.RDataOffset, skip, len(wire))
+	}
 	offset := rr.RDataOffset + skip
+	if offset >= len(wire) {
+		return nil, fmt.Errorf("name-carrier RDATA offset %d is outside DNS wire message", offset)
+	}
 	labels, err := decodeHTTPcustomWireName(wire, offset)
 	if err != nil {
 		return nil, err
 	}
 	if len(domain) > 0 && len(labels) >= len(domain) {
-		matches := true
 		start := len(labels) - len(domain)
+		matches := true
 		for i, suffixLabel := range domain {
 			if !bytes.Equal(bytes.ToLower([]byte(labels[start+i])), bytes.ToLower(suffixLabel)) {
 				matches = false
@@ -285,24 +383,29 @@ func decodeHTTPcustomNameCarrier(wire []byte, rr dns.RR, qtype uint16, domain dn
 		return nil, fmt.Errorf("empty HTTP Custom name carrier")
 	}
 
-	// CNAME has a dedicated upper-case normalization path in HTTP Custom.
-	// The other name-carrier records also normalize Base32's alphabetic
-	// digits for case-insensitive DNS label transport.
-	var encoded strings.Builder
-	for _, label := range labels {
-		for _, ch := range label {
-			if ch >= 'a' && ch <= 'z' {
-				ch -= 'a' - 'A'
-			}
-			encoded.WriteByte(byte(ch))
-		}
-	}
-	payload := make([]byte, httpCustomBase32Encoding.DecodedLen(encoded.Len()))
-	n, err := httpCustomBase32Encoding.Decode(payload, []byte(encoded.String()))
+	// DNS labels are octet strings. Iterate bytes rather than UTF-8 runes so
+	// malformed non-ASCII octets cannot be rewritten during normalization.
+	encoded := httpCustomBase32NameBytes(labels)
+	payload := make([]byte, httpCustomBase32Encoding.DecodedLen(len(encoded)))
+	n, err := httpCustomBase32Encoding.Decode(payload, encoded)
 	if err != nil {
 		return nil, fmt.Errorf("decode QTYPE %d Base32 name carrier: %w", qtype, err)
 	}
 	return payload[:n], nil
+}
+
+func httpCustomBase32NameBytes(labels []string) []byte {
+	encoded := make([]byte, 0)
+	for _, label := range labels {
+		for i := 0; i < len(label); i++ {
+			ch := label[i]
+			if ch >= 'a' && ch <= 'z' {
+				ch -= 'a' - 'A'
+			}
+			encoded = append(encoded, ch)
+		}
+	}
+	return encoded
 }
 
 func decodeHTTPcustomAnswer(wire []byte, resp *dns.Message, domain dns.Name, qtype uint16) []byte {
@@ -314,7 +417,9 @@ func decodeHTTPcustomAnswer(wire []byte, resp *dns.Message, domain dns.Name, qty
 		if answer.Class != dns.ClassIN || answer.Type != qtype {
 			continue
 		}
-		if _, ok := answer.Name.TrimSuffix(domain); !ok {
+		prefix, ok := answer.Name.TrimSuffix(domain)
+		if !ok || len(prefix) == 0 {
+			// Ignore the zone apex: it carries no encoded payload label.
 			continue
 		}
 
@@ -358,6 +463,9 @@ func httpCustomTransportMTU(domain dns.Name, qtype uint16) int {
 	mtu := frameCapacity - 13
 	if mtu > 223 {
 		mtu = 223
+	}
+	if mtu < 0 {
+		return 0
 	}
 	return mtu
 }

@@ -1,3 +1,107 @@
+## 2026-11-15 — Replay initial KCP handshake during Auto QTYPE probing
+
+- Cache up to four unique outbound KCP PUSH datagrams for the active conversation
+  while HTTP Custom Auto is negotiating.
+- On each QTYPE rotation, replay the cached datagrams through the single network
+  send loop using the new candidate carrier, rather than sending only an empty poll.
+- Preserve packet bytes exactly, discard stale candidate replays, and clear the
+  handshake cache when a matching server KCP PUSH locks the selected QTYPE.
+- Add regression tests for replay across multiple rotations, byte-for-byte packet
+  preservation, duplicate suppression, and stopping replay after Auto lock.
+
+## 2026-11-15 — Fix HTTP Custom MTU regression test for OpenWrt builds
+
+- Correct the test fixture to use the DNS name-label byte-slice type expected by
+  `dns.Name`.
+- Run Go tests and vet with `CGO_ENABLED=0` in the OpenWrt instructions so the test
+  binary does not require the host's unavailable `libresolv` development library.
+
+## 2026-11-15 — Align name-carrier regression test with optional suffix
+
+- Replace the obsolete rejection test for nonmatching RDATA tails. When the
+  configured zone suffix is absent, labels that resemble another DNS name
+  remain Base32 carrier data; the answer RR owner is still checked against the
+  configured tunnel zone before the decoder is called.
+
+## 2026-11-15 — Fix HTTP Custom name-carrier decoding and polling
+
+- Accept NS/CNAME/MX/SRV name-carrier RDATA whose Base32 labels omit the tunnel
+  zone suffix, while stripping the suffix when it is present.
+- Wake the send loop immediately whenever Auto QTYPE rotates, ensuring each
+  candidate gets a query even when exponential polling has backed off.
+- Use a 125 ms initial poll interval and a 1-second maximum poll backoff for
+  all HTTP Custom modes; keep standard DNSTT at 500 ms initial and 10 seconds
+  maximum.
+- Clamp negative computed HTTP Custom MTUs to zero and add regression tests for
+  suffix-less carriers, Auto poll wakeups, polling bounds, and MTU underflow.
+
+## 2026-11-15 — Expose HTTP Custom KCP profile in Passwall-SSH LuCI
+
+- Add UCI option `KCP_PROFILE`, defaulting to `native` for existing routers.
+- Add a LuCI selector for Native and Conservative KCP profiles.
+- Validate the value in the apply script and supervisor, and pass it to
+  `dnstt-client -kcp-profile` for UDP HTTP Custom mode.
+- Extend the OpenWrt integration workflow to validate profile forwarding and
+  LuCI form presence.
+
+## 2026-11-15 — Enable congestion control in the conservative profile
+
+- Change the opt-in conservative HTTP Custom KCP profile to `nc=0`, enabling
+  KCP congestion control in addition to the 100 ms interval, normal minimum
+  RTO, disabled fast-resend, and delayed ACKs. The native default remains
+  `nc=1` to match the captured Android profile.
+- Extract Noise NK negotiation into a deadline-aware helper and add a
+  net.Pipe regression test proving the handshake returns a timeout when the
+  responder never sends its message.
+
+## 2026-11-15 — Bound Noise handshake and add high-RTT diagnostics
+
+- Add a 60-second default deadline to Noise NK negotiation, with
+  `-noise-timeout 0` to disable it. Log local listener readiness, handshake
+  start, completion, and failures distinctly.
+- Add an opt-in `-kcp-profile conservative` using nodelay=0, 100 ms interval,
+  fastresend=0, and delayed ACKs. Keep the PCAP-matched `native` profile as
+  the default; this profile switch is for controlled RTT/jitter comparison.
+- Select the UDP socket family explicitly (udp4/udp6) based on the resolved
+  destination address.
+- Validate name-carrier RDataOffset is at least the 12-byte DNS header and
+  remains inside the received DNS wire message before following compression
+  pointers.
+- Extend shadowsocks-style plugin forwarding to include `kcp-profile` and
+  `noise-timeout`, with regression tests for these options, KCP profiles,
+  address-family selection, and invalid RDataOffset values.
+
+## 2026-11-15 — Harden HTTP Custom packet queues and DNS decoding
+
+- Limit detailed KCP TX datagram/segment dumps to the first 30 successful sends;
+  periodic DNS TX summaries remain available.
+- Add per-session packet queue sizing. HTTP Custom queues now track the effective
+  KCP window (minimum 128, maximum 4096), while standard DNSTT retains its
+  upstream default of 128.
+- Count and log incoming/outgoing packet-queue drops instead of leaving local
+  queue pressure invisible.
+- Correct literal newline escapes in HTTP Custom CLI validation errors.
+- Reject apex answer owners and name-carrier RDATA whose target does not end in
+  the configured tunnel zone; normalize DNS name-carrier octets byte-by-byte.
+- Expand compressed-name tests to parse a real DNS wire message with multiple
+  answers and verify the parser-populated RDataOffset.
+- Pass HTTP Custom, QTYPE, and KCP-window options through SS_PLUGIN_OPTIONS.
+- Add regression tests for queue capacities, overflow counters, apex filtering,
+  wrong-zone rejection, raw DNS octets, and plugin argument forwarding.
+
+## 2026-11-15 — HTTP Custom automatic QTYPE selection
+
+- Add `-qtype auto` for UDP HTTP Custom mode. The client probes NS, TXT, CNAME,
+  SRV, MX, then NULL, changing candidate every two seconds while negotiating.
+- Decode delayed DNS responses using the RR type echoed in the DNS question.
+- Lock the selected RR type only after a structurally valid KCP PUSH matching
+  the active KCP conversation ID is received; stop the probe ticker after lock.
+- Add AUTO to both UCI validation scripts and the LuCI QTYPE selector.
+- Add unit tests for QTYPE parsing/order, response-carrier selection, KCP
+  conversation matching, single-lock behavior, and conservative Auto MTU.
+- Provider/resolver end-to-end behavior remains to be verified in CI and on
+  the physical OpenWrt client. Fixed NS remains the known-good configuration.
+
 # Changelog
 
 ## 2026-11-13 — Full native-framing Go client test passes on OpenWrt 25.12.5 VM

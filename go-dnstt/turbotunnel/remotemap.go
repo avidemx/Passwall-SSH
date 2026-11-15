@@ -43,10 +43,18 @@ type RemoteMap struct {
 // instantiate a new send queue, and if the peer is ever seen again with a
 // matching address, we'll deliver them.
 func NewRemoteMap(timeout time.Duration) *RemoteMap {
+	return NewRemoteMapWithQueueSize(timeout, QueueSize)
+}
+
+// NewRemoteMapWithQueueSize creates a RemoteMap whose per-peer send queues
+// use queueSize entries. Values are bounded by normalizeQueueSize.
+func NewRemoteMapWithQueueSize(timeout time.Duration, queueSize int) *RemoteMap {
+	queueSize = normalizeQueueSize(queueSize)
 	m := &RemoteMap{
 		inner: remoteMapInner{
-			byAge:  make([]*remoteRecord, 0),
-			byAddr: make(map[net.Addr]int),
+			byAge:     make([]*remoteRecord, 0),
+			byAddr:    make(map[net.Addr]int),
+			queueSize: queueSize,
 		},
 	}
 	if timeout > 0 {
@@ -98,8 +106,9 @@ func (m *RemoteMap) Unstash(addr net.Addr) <-chan []byte {
 // allow looking up by address. Unlike RemoteMap, remoteMapInner requires
 // external synchonization.
 type remoteMapInner struct {
-	byAge  []*remoteRecord
-	byAddr map[net.Addr]int
+	byAge     []*remoteRecord
+	byAddr    map[net.Addr]int
+	queueSize int
 }
 
 // removeExpired removes all records whose LastSeen timestamp is more than
@@ -127,7 +136,7 @@ func (inner *remoteMapInner) Lookup(addr net.Addr, now time.Time) *remoteRecord 
 		record = &remoteRecord{
 			Addr:      addr,
 			LastSeen:  now,
-			SendQueue: make(chan []byte, QueueSize),
+			SendQueue: make(chan []byte, normalizeQueueSize(inner.queueSize)),
 			Stash:     make(chan []byte, 1),
 		}
 		heap.Push(inner, record)

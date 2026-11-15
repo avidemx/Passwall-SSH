@@ -6,9 +6,24 @@ package turbotunnel
 
 import "errors"
 
-// QueueSize is the size of send and receive queues in QueuePacketConn and
-// RemoteMap.
+// QueueSize is the default size of send and receive queues in QueuePacketConn
+// and RemoteMap. HTTP Custom sessions may request a larger per-session queue
+// without changing the standard DNSTT default.
 const QueueSize = 128
+
+// MaxQueueSize bounds per-session queue allocations. The HTTP Custom KCP
+// window is currently capped at the same value.
+const MaxQueueSize = 4096
+
+func normalizeQueueSize(queueSize int) int {
+	if queueSize < QueueSize {
+		return QueueSize
+	}
+	if queueSize > MaxQueueSize {
+		return MaxQueueSize
+	}
+	return queueSize
+}
 
 var errClosedPacketConn = errors.New("operation on closed connection")
 var errNotImplemented = errors.New("not implemented")

@@ -163,6 +163,49 @@ func handle(local *net.TCPConn, sess *smux.Session, conv uint32) error {
 	return err
 }
 
+type httpCustomKCPProfile struct {
+	name          string
+	nodelay       int
+	interval      int
+	fastresend    int
+	nocwnd        int
+	ackNoDelay    bool
+	writeDelay    bool
+}
+
+// selectHTTPcustomKCPProfile keeps the PCAP-matched native profile as default.
+// The conservative profile uses upstream-style RTO/flush timing for high-RTT
+// resolvers and is an opt-in diagnostic alternative.
+func selectHTTPcustomKCPProfile(name string) (httpCustomKCPProfile, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "native":
+		return httpCustomKCPProfile{
+			name: "native", nodelay: 1, interval: 20, fastresend: 2,
+			nocwnd: 1, ackNoDelay: true, writeDelay: false,
+		}, nil
+	case "conservative":
+		return httpCustomKCPProfile{
+			name: "conservative", nodelay: 0, interval: 100, fastresend: 0,
+			nocwnd: 0, ackNoDelay: false, writeDelay: false,
+		}, nil
+	default:
+		return httpCustomKCPProfile{}, fmt.Errorf("unsupported HTTP Custom KCP profile %q (choose native or conservative)", name)
+	}
+}
+
+func udpListenNetwork(addr *net.UDPAddr) string {
+	if addr == nil || addr.IP == nil {
+		return "udp"
+	}
+	if addr.IP.To4() != nil {
+		return "udp4"
+	}
+	if addr.IP.To16() != nil {
+		return "udp6"
+	}
+	return "udp"
+}
+
 func selectKCPWindow(requested int, httpCustom bool) (int, error) {
 	if requested == 0 {
 		if httpCustom {
@@ -176,19 +219,72 @@ func selectKCPWindow(requested int, httpCustom bool) (int, error) {
 	return requested, nil
 }
 
-func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.Addr, pconn net.PacketConn, httpCustom bool, qtype uint16, kcpWindow int) error {
+func noiseClientWithTimeout(conn net.Conn, pubkey []byte, timeout time.Duration) (io.ReadWriteCloser, error) {
+	if timeout < 0 {
+		return nil, fmt.Errorf("Noise handshake timeout cannot be negative")
+	}
+	if timeout > 0 {
+		if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			return nil, fmt.Errorf("setting Noise handshake deadline: %w", err)
+		}
+	}
+	rw, err := noise.NewClient(conn, pubkey)
+	if err != nil {
+		if timeout > 0 {
+			return nil, fmt.Errorf("Noise NK handshake failed (deadline %s): %w", timeout, err)
+		}
+		return nil, fmt.Errorf("Noise NK handshake failed: %w", err)
+	}
+	if timeout > 0 {
+		if err := conn.SetDeadline(time.Time{}); err != nil {
+			_ = rw.Close()
+			return nil, fmt.Errorf("clearing Noise handshake deadline: %w", err)
+		}
+	}
+	return rw, nil
+}
+
+func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.Addr, pconn net.PacketConn, httpCustom bool, qtype uint16, kcpWindow int, kcpProfile string, noiseHandshakeTimeout time.Duration) error {
 	defer pconn.Close()
+
+	var autoQTypeController interface {
+		SetHTTPcustomAutoKCPConv(uint32)
+		StopHTTPcustomAutoQType()
+	}
+	if httpCustom && qtype == 0 {
+		controller, ok := pconn.(interface {
+			SetHTTPcustomAutoKCPConv(uint32)
+			StopHTTPcustomAutoQType()
+		})
+		if !ok {
+			return fmt.Errorf("HTTP Custom Auto QTYPE controller is unavailable")
+		}
+		autoQTypeController = controller
+		defer autoQTypeController.StopHTTPcustomAutoQType()
+	}
 
 	ln, err := net.ListenTCP("tcp", localAddr)
 	if err != nil {
 		return fmt.Errorf("opening local listener: %v", err)
 	}
 	defer ln.Close()
+	log.Printf("local TCP listener ready at %s", ln.Addr())
+
+	if noiseHandshakeTimeout < 0 {
+		return fmt.Errorf("Noise handshake timeout cannot be negative")
+	}
 
 	mtu := dnsNameCapacity(domain) - 8 - 1 - numPadding - 1 // standard DNSTT client ID and padding overhead
 	if httpCustom {
+		// QTYPE 0 is an internal Auto setting, never a wire QTYPE. The
+		// Base32 calculation remains conservative even if NULL is selected.
 		mtu = httpCustomTransportMTU(domain, qtype)
-		log.Printf("HTTP Custom SlowDNS enabled: QTYPE=%d", qtype)
+		if qtype == 0 {
+			log.Printf("HTTP Custom SlowDNS enabled: QTYPE=AUTO")
+		} else {
+			log.Printf("HTTP Custom SlowDNS enabled: QTYPE=%s (%d)",
+				httpCustomQTypeName(qtype), qtype)
+		}
 	}
 	if mtu < 80 {
 		return fmt.Errorf("domain %s leaves only %d bytes for payload", domain, mtu)
@@ -205,20 +301,27 @@ func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.
 		conn.Close()
 	}()
 	log.Printf("begin session %08x", conn.GetConv())
-	// Match the KCP profile recovered from HTTP Custom's native
-	// slowdns.configureClientKCP. Keep the upstream defaults in standard mode.
+	if autoQTypeController != nil {
+		autoQTypeController.SetHTTPcustomAutoKCPConv(conn.GetConv())
+	}
+	// Match the recovered native HTTP Custom profile by default. The
+	// conservative profile is opt-in for high-RTT or high-jitter resolvers.
 	conn.SetStreamMode(true)
 	if httpCustom {
-		conn.SetNoDelay(
-			1,  // nodelay
-			20, // interval in milliseconds
-			2,  // fast resend threshold
-			1,  // nc=1 disables dynamic congestion control
-		)
-		conn.SetACKNoDelay(true)
-		conn.SetWriteDelay(false)
-		log.Printf("KCP profile: HTTP Custom nodelay=1 interval=20 fastresend=2 nc=1 ackNoDelay=true writeDelay=false")
+		profile, profileErr := selectHTTPcustomKCPProfile(kcpProfile)
+		if profileErr != nil {
+			return profileErr
+		}
+		conn.SetNoDelay(profile.nodelay, profile.interval, profile.fastresend, profile.nocwnd)
+		conn.SetACKNoDelay(profile.ackNoDelay)
+		conn.SetWriteDelay(profile.writeDelay)
+		log.Printf("KCP profile: HTTP Custom %s nodelay=%d interval=%d fastresend=%d nc=%d ackNoDelay=%t writeDelay=%t",
+			profile.name, profile.nodelay, profile.interval, profile.fastresend,
+			profile.nocwnd, profile.ackNoDelay, profile.writeDelay)
 	} else {
+		if kcpProfile != "" && !strings.EqualFold(kcpProfile, "native") {
+			return fmt.Errorf("-kcp-profile is available only with -httpcustom")
+		}
 		conn.SetNoDelay(
 			0, // upstream default nodelay
 			0, // upstream default interval
@@ -236,11 +339,18 @@ func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.
 		panic(rc)
 	}
 
-	// Put a Noise channel on top of the KCP conn.
-	rw, err := noise.NewClient(conn, pubkey)
+	// Put a Noise channel on top of the KCP conn. Bound the NK handshake so
+	// a missing/invalid DNS downlink cannot leave the process waiting forever.
+	if noiseHandshakeTimeout > 0 {
+		log.Printf("Noise NK handshake started (timeout=%s)", noiseHandshakeTimeout)
+	} else {
+		log.Printf("Noise NK handshake started (timeout disabled)")
+	}
+	rw, err := noiseClientWithTimeout(conn, pubkey, noiseHandshakeTimeout)
 	if err != nil {
 		return err
 	}
+	log.Printf("Noise NK handshake completed")
 
 	// Start a smux session on the Noise channel.
 	smuxConfig := smux.DefaultConfig()
@@ -272,6 +382,62 @@ func run(pubkey []byte, domain dns.Name, localAddr *net.TCPAddr, remoteAddr net.
 }
 
 var dialerControl func(network, address string, c syscall.RawConn) error = nil
+
+// appendSSPluginFeatureFlags adds optional HTTP Custom settings to the
+// reconstructed command line used by shadowsocks-style plugin invocation.
+// These flags must be inserted before DOMAIN and LOCALADDR for flag.Parse.
+func appendSSPluginFeatureFlags(args []string, pluginOptions string) []string {
+	var httpCustomOption, qtypeOption, kcpWindowOption string
+	var kcpProfileOption, noiseTimeoutOption string
+	for _, option := range strings.Split(pluginOptions, ";") {
+		parts := strings.SplitN(option, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		switch key {
+		case "httpcustom":
+			httpCustomOption = value
+		case "qtype":
+			qtypeOption = value
+		case "kcp-window":
+			kcpWindowOption = value
+		case "kcp-profile":
+			kcpProfileOption = value
+		case "noise-timeout":
+			noiseTimeoutOption = value
+		}
+	}
+	if strings.EqualFold(httpCustomOption, "true") ||
+		strings.EqualFold(httpCustomOption, "yes") ||
+		strings.EqualFold(httpCustomOption, "on") ||
+		httpCustomOption == "1" {
+		args = append(args, "-httpcustom")
+	}
+	if qtypeOption != "" {
+		args = append(args, "-qtype", qtypeOption)
+	}
+	if kcpWindowOption != "" {
+		args = append(args, "-kcp-window", kcpWindowOption)
+	}
+	if kcpProfileOption != "" {
+		args = append(args, "-kcp-profile", kcpProfileOption)
+	}
+	if noiseTimeoutOption != "" {
+		args = append(args, "-noise-timeout", noiseTimeoutOption)
+	}
+	return args
+}
+
+func queueSizeForKCPWindow(window int) int {
+	if window < turbotunnel.QueueSize {
+		return turbotunnel.QueueSize
+	}
+	if window > turbotunnel.MaxQueueSize {
+		return turbotunnel.MaxQueueSize
+	}
+	return window
+}
 
 func main() {
 	// If no command-line arguments are given, try to read options from
@@ -349,15 +515,17 @@ func main() {
 			}
 
 			// Reconstruct os.Args so the existing flag-parsing logic can be used.
-			os.Args = []string{
+			// Feature flags must precede the positional DOMAIN and LOCALADDR.
+			args := []string{
 				os.Args[0],
 				transportFlag,
 				resolver,
 				"-pubkey",
 				pubkey,
-				domainStr,
-				net.JoinHostPort(localHost, localPort),
 			}
+			args = appendSSPluginFeatureFlags(args, pluginOpts)
+			args = append(args, domainStr, net.JoinHostPort(localHost, localPort))
+			os.Args = args
 		}
 	}
 
@@ -370,6 +538,8 @@ func main() {
 	var httpCustom bool
 	var slowDNSQType string
 	var kcpWindow int
+	var kcpProfile string
+	var noiseHandshakeTimeout time.Duration
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), `Usage:
@@ -409,25 +579,43 @@ Known TLS fingerprints for -utls are:
 	flag.StringVar(&pubkeyFilename, "pubkey-file", "", "read server public key from file")
 	flag.StringVar(&udpAddr, "udp", "", "address of UDP DNS resolver")
 	flag.BoolVar(&httpCustom, "httpcustom", false, "use HTTP Custom SlowDNS DNS framing (UDP only)")
-	flag.StringVar(&slowDNSQType, "qtype", "ns", "HTTP Custom RR mode: ns, cname, null, mx, txt, or srv")
+	flag.StringVar(&slowDNSQType, "qtype", "ns", "HTTP Custom RR mode: auto, ns, cname, null, mx, txt, or srv")
 	flag.IntVar(&kcpWindow, "kcp-window", 0, "KCP send/receive window (HTTP Custom defaults to 512; standard mode defaults to upstream QueueSize/2)")
+	flag.StringVar(&kcpProfile, "kcp-profile", "native", "HTTP Custom KCP profile: native (default) or conservative")
+	flag.DurationVar(&noiseHandshakeTimeout, "noise-timeout", 60*time.Second, "Noise NK handshake timeout; use 0 to disable")
 	flag.StringVar(&utlsDistribution, "utls",
 		"4*random,3*Firefox_120,1*Firefox_105,3*Chrome_120,1*Chrome_102,1*iOS_14,1*iOS_13",
 		"choose TLS fingerprint from weighted distribution")
 	flag.Parse()
 
 	qtype := uint16(0)
+	httpCustomQueueSize := turbotunnel.QueueSize
+	if noiseHandshakeTimeout < 0 {
+		fmt.Fprintf(os.Stderr, "invalid -noise-timeout: value cannot be negative\n")
+		os.Exit(2)
+	}
 	if httpCustom {
+		if _, profileErr := selectHTTPcustomKCPProfile(kcpProfile); profileErr != nil {
+			fmt.Fprintf(os.Stderr, "invalid -kcp-profile: %v\n", profileErr)
+			os.Exit(2)
+		}
 		if udpAddr == "" || dohURL != "" || dotAddr != "" {
-			fmt.Fprintf(os.Stderr, "-httpcustom currently requires -udp; DoH and DoT are not enabled for this mode\\n")
+			fmt.Fprintf(os.Stderr, "-httpcustom currently requires -udp; DoH and DoT are not enabled for this mode\n")
 			os.Exit(2)
 		}
 		parsedQType, parseErr := parseHTTPcustomQType(slowDNSQType)
 		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "invalid -qtype: %v\\n", parseErr)
+			fmt.Fprintf(os.Stderr, "invalid -qtype: %v\n", parseErr)
 			os.Exit(2)
 		}
 		qtype = parsedQType
+
+		selectedWindow, windowErr := selectKCPWindow(kcpWindow, true)
+		if windowErr != nil {
+			fmt.Fprintf(os.Stderr, "invalid -kcp-window: %v\n", windowErr)
+			os.Exit(2)
+		}
+		httpCustomQueueSize = queueSizeForKCPWindow(selectedWindow)
 	}
 
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -534,7 +722,12 @@ Known TLS fingerprints for -utls are:
 			lc := net.ListenConfig{
 				Control: dialerControl,
 			}
-			pconn, err := lc.ListenPacket(context.Background(), "udp", ":0")
+			network := udpListenNetwork(addr)
+			localAddress := ":0"
+			if network == "udp6" {
+				localAddress = "[::]:0"
+			}
+			pconn, err := lc.ListenPacket(context.Background(), network, localAddress)
 			return addr, pconn, err
 		}},
 	} {
@@ -558,11 +751,12 @@ Known TLS fingerprints for -utls are:
 	}
 
 	if httpCustom {
-		pconn = NewHTTPcustomDNSPacketConn(pconn, remoteAddr, domain, qtype)
+		log.Printf("HTTP Custom packet queue capacity: %d incoming/outgoing", httpCustomQueueSize)
+		pconn = NewHTTPcustomDNSPacketConnWithQueueSize(pconn, remoteAddr, domain, qtype, httpCustomQueueSize)
 	} else {
 		pconn = NewDNSPacketConn(pconn, remoteAddr, domain)
 	}
-	err = run(pubkey, domain, localAddr, remoteAddr, pconn, httpCustom, qtype, kcpWindow)
+	err = run(pubkey, domain, localAddr, remoteAddr, pconn, httpCustom, qtype, kcpWindow, kcpProfile, noiseHandshakeTimeout)
 	if err != nil {
 		log.Fatal(err)
 	}
