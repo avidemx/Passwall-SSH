@@ -1279,7 +1279,7 @@ slowdns_settings.cfgvalue = function()
 
     local enabled_value = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "enabled") or "0"
     local enabled_checked = enabled_value == "1" and ' checked="checked"' or ""
-    local selected_qtype = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "Type_DNS") or "NS"
+    local selected_qtype = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "Type_DNS") or "AUTO"
     local selected_dns_transport = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "DNS_TRANSPORT") or "UDP"
     local selected_dns_transport_upper = string.upper(selected_dns_transport)
     if selected_dns_transport_upper == "DOH" then
@@ -1337,15 +1337,16 @@ slowdns_settings.cfgvalue = function()
                         id="slowdns_DNS_RESOLVER" name="slowdns_DNS_RESOLVER"
                         value="]=] .. slowdns_html_escape(selected_dns_resolver) .. [=["
                         placeholder="1.1.1.1" />
-                    <div class="cbi-value-description" id="slowdns-dns-help">Masukkan alamat IPv4 resolver UDP. DNSTT HTTP Custom menggunakan UDP port 53.</div>
+                    <div class="cbi-value-description" id="slowdns-dns-help">Masukkan alamat IPv4 resolver UDP. DNSTT UDP menggunakan port 53.</div>
                 </div>
             </div>
 
             <div class="cbi-value" id="slowdns-qtype-row">
-                <label class="cbi-value-title" for="slowdns_Type_DNS">HTTP Custom QTYPE :</label>
+                <label class="cbi-value-title" for="slowdns_Type_DNS">QTYPE :</label>
                 <div class="cbi-value-field">
                     <select class="cbi-input-select" id="slowdns_Type_DNS" name="slowdns_Type_DNS">
                         ]=] ..
+                        qtype_option("AUTO", "AUTO") ..
                         qtype_option("NS", "NS") ..
                         qtype_option("TXT", "TXT") ..
                         qtype_option("MX", "MX") ..
