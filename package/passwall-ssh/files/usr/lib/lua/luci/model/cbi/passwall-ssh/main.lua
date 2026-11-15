@@ -172,24 +172,28 @@ end
 
 local function get_initial_local_ip()
     local route_out = sys.exec([[ip route 2>/dev/null | awk '/^default/ {
-        gw=""; dev="";
+        src=""; dev="";
         for(i=1;i<=NF;i++) {
-            if($i=="via") gw=$(i+1);
+            if($i=="src") src=$(i+1);
             if($i=="dev") dev=$(i+1);
         }
-        if(dev!="tun0" && (gw!="" || dev!="")) { print gw "|" dev; found=1; exit }
-        if(!fallback && (gw!="" || dev!="")) fallback=gw "|" dev;
+        if(dev!="tun0" && (src!="" || dev!="")) { print src "|" dev; found=1; exit }
+        if(!fallback && (src!="" || dev!="")) fallback=src "|" dev;
     }
     END { if(!found && fallback!="") print fallback }']]) or ""
     route_out = route_out:gsub("[\r\n]+", "")
-    local gw, dev = route_out:match("^([^|]*)|([^|]*)$")
-    gw = (gw or ""):gsub("%s+", "")
+    local src_ip, dev = route_out:match("^([^|]*)|([^|]*)$")
+    src_ip = (src_ip or ""):gsub("%s+", "")
     dev = (dev or ""):gsub("%s+", "")
 
-    if gw ~= "" and dev ~= "" then
-        return gw .. " (" .. dev .. ")"
-    elseif gw ~= "" then
-        return gw
+    if src_ip == "" and dev ~= "" and dev:match("^[%w%.%-_]+$") then
+        src_ip = (sys.exec("ip -4 addr show dev '" .. dev .. "' 2>/dev/null | awk '/inet / {split($2,a,\"/\"); print a[1]; exit}'") or ""):gsub("%s+", "")
+    end
+
+    if src_ip ~= "" and dev ~= "" then
+        return src_ip .. " (" .. dev .. ")"
+    elseif src_ip ~= "" then
+        return src_ip
     elseif dev ~= "" then
         return dev
     else
