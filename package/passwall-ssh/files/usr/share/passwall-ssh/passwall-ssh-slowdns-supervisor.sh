@@ -11,6 +11,7 @@ STATUS="/tmp/etc/passwall-ssh.state"
 LOG="/tmp/etc/passwall-ssh.log"
 SSH_LOG="$RUN/ssh-debug.log"
 SSH_OUTPUT_LOG="$RUN/ssh-output.log"
+DNSTT_LOG="$RUN/dnstt.log"
 
 DNSTT_BIN="/usr/bin/dnstt-client"
 DNSTT_LOCAL_PORT="2222"
@@ -45,7 +46,7 @@ rm -f /tmp/etc/passwall-ssh-slowdns-dnstt.log /tmp/etc/passwall-ssh-slowdns-rout
 SSH_PID=""
 DNSTT_PID=""
 STOPPING=0
-SSH_AUTH_TIMEOUT=25
+SSH_AUTH_TIMEOUT=10
 SSH_TIMEOUT_LIMIT=10
 SSH_TIMEOUT_COUNT=0
 AUTO_STOP=0
@@ -142,17 +143,18 @@ read_config() {
     DNS_TRANSPORT=$(printf '%s' "$DNS_TRANSPORT" | tr '[:lower:]' '[:upper:]')
     [ -n "$DNS_RESOLVER" ] || DNS_RESOLVER="$_legacy_dns_ip"
     [ -n "$DNS_RESOLVER" ] || DNS_RESOLVER="1.1.1.1"
-    [ -n "$DNS_QTYPE" ] || DNS_QTYPE="NS"
+    [ -n "$DNS_QTYPE" ] || DNS_QTYPE="AUTO"
 
     case "$DNS_TRANSPORT" in
         UDP)
             ipv4_ok "$DNS_RESOLVER" || {
-                CONFIG_ERROR="UDP DNS resolver must be an IPv4 address"
+                CONFIG_ERROR="Resolver UDP harus berupa alamat IPv4 yang valid"
                 return 1
             }
             DNS_RESOLVER_HOST="$DNS_RESOLVER"
             DNS_UDP_PORT="53"
             case "$DNS_QTYPE" in
+                AUTO|auto) DNS_QTYPE="auto" ;;
                 NS|ns) DNS_QTYPE="ns" ;;
                 TXT|txt) DNS_QTYPE="txt" ;;
                 MX|mx) DNS_QTYPE="mx" ;;
@@ -160,7 +162,7 @@ read_config() {
                 NULL|null) DNS_QTYPE="null" ;;
                 SRV|srv) DNS_QTYPE="srv" ;;
                 *)
-                    CONFIG_ERROR="Unsupported HTTP Custom QTYPE: $DNS_QTYPE"
+                    CONFIG_ERROR="QTYPE tidak didukung: $DNS_QTYPE"
                     return 1
                     ;;
             esac
@@ -169,7 +171,7 @@ read_config() {
             case "$DNS_RESOLVER" in
                 https://*) ;;
                 *)
-                    CONFIG_ERROR="DoH resolver must be a complete HTTPS URL"
+                    CONFIG_ERROR="Resolver DoH harus berupa URL HTTPS lengkap"
                     return 1
                     ;;
             esac
@@ -179,7 +181,7 @@ read_config() {
             _authority=${_authority%%#*}
             DNS_RESOLVER_HOST=${_authority%%:*}
             printf '%s\n' "$DNS_RESOLVER_HOST" | grep -qE '^[A-Za-z0-9.-]+$' || {
-                CONFIG_ERROR="DoH URL contains an invalid hostname"
+                CONFIG_ERROR="URL DoH mengandung nama host yang tidak valid"
                 return 1
             }
             DNS_UDP_PORT="443"
@@ -187,7 +189,7 @@ read_config() {
                 *:*)
                     _port=${_authority##*:}
                     valid_port "$_port" || {
-                        CONFIG_ERROR="DoH URL port must be between 1 and 65535"
+                        CONFIG_ERROR="Port pada URL DoH harus antara 1 sampai 65535"
                         return 1
                     }
                     DNS_UDP_PORT="$_port"
@@ -207,68 +209,68 @@ read_config() {
                     ;;
             esac
             printf '%s\n' "$DNS_RESOLVER_HOST" | grep -qE '^[A-Za-z0-9.-]+$' || {
-                CONFIG_ERROR="DoT resolver must be a hostname or IPv4 address with an optional port"
+                CONFIG_ERROR="Resolver DoT harus berupa hostname atau IPv4 (dengan port opsional)"
                 return 1
             }
             valid_port "$DNS_UDP_PORT" || {
-                CONFIG_ERROR="DoT port must be between 1 and 65535"
+                CONFIG_ERROR="Port DoT harus antara 1 sampai 65535"
                 return 1
             }
             ;;
         *)
-            CONFIG_ERROR="Unsupported DNS transport: $DNS_TRANSPORT"
+            CONFIG_ERROR="Transport DNS tidak didukung: $DNS_TRANSPORT"
             return 1
             ;;
     esac
 
     DNS_RESOLVER_IPS=$(resolve_ipv4_list "$DNS_RESOLVER_HOST") || {
-        CONFIG_ERROR="Unable to resolve DNS endpoint '$DNS_RESOLVER_HOST' to an IPv4 address"
+        CONFIG_ERROR="Gagal meresolve endpoint DNS '$DNS_RESOLVER_HOST' ke alamat IPv4"
         return 1
     }
     DNS_UDP_IP=$(printf '%s\n' "$DNS_RESOLVER_IPS" | head -n 1)
     ipv4_ok "$DNS_UDP_IP" || {
-        CONFIG_ERROR="DNS endpoint has no valid IPv4 address"
+        CONFIG_ERROR="Endpoint DNS tidak memiliki alamat IPv4 yang valid"
         return 1
     }
 
     [ -n "$DNSTT_DOMAIN" ] || {
-        CONFIG_ERROR="DNSTT domain is missing"
+        CONFIG_ERROR="Name Server (domain DNSTT) belum diisi"
         return 1
     }
     printf '%s\n' "$DNSTT_DOMAIN" | grep -qE '^[A-Za-z0-9.-]+$' || {
-        CONFIG_ERROR="DNSTT domain contains invalid characters"
+        CONFIG_ERROR="Name Server (domain DNSTT) mengandung karakter yang tidak valid"
         return 1
     }
 
     [ -n "$DNSTT_SERVER_PUBLIC_KEY" ] || {
-        CONFIG_ERROR="DNSTT server public key is missing"
+        CONFIG_ERROR="Public Key server DNSTT belum diisi"
         return 1
     }
     case "$DNSTT_SERVER_PUBLIC_KEY" in
         /*)
             [ -r "$DNSTT_SERVER_PUBLIC_KEY" ] || {
-                CONFIG_ERROR="Public key file does not exist or cannot be read"
+                CONFIG_ERROR="File Public Key tidak ditemukan atau tidak dapat dibaca"
                 return 1
             }
             ;;
         *)
             printf '%s' "$DNSTT_SERVER_PUBLIC_KEY" | grep -qE '^[[:xdigit:]]{64}$' || {
-                CONFIG_ERROR="Public key must be an absolute file path or a 64-character hexadecimal value"
+                CONFIG_ERROR="Public Key harus berupa path file absolut atau 64 karakter heksadesimal"
                 return 1
             }
             ;;
     esac
 
     [ -n "$SSH_USERNAME" ] || {
-        CONFIG_ERROR="SSH username is missing"
+        CONFIG_ERROR="Username SSH belum diisi"
         return 1
     }
     printf '%s\n' "$SSH_USERNAME" | grep -qE '^[A-Za-z0-9._-]+$' || {
-        CONFIG_ERROR="SSH username contains invalid characters"
+        CONFIG_ERROR="Username SSH mengandung karakter yang tidak valid"
         return 1
     }
     [ -n "$SSH_PASSWORD" ] || {
-        CONFIG_ERROR="SSH password is missing"
+        CONFIG_ERROR="Password SSH belum diisi"
         return 1
     }
 
@@ -366,24 +368,24 @@ cleanup_fw4() {
 setup_fw4() {
     nft add chain inet fw4 "$FW_CHAIN" 2>/dev/null
     if ! nft flush chain inet fw4 "$FW_CHAIN" 2>/dev/null; then
-        log_error "Unable to prepare firewall chain $FW_CHAIN."
+        log_error "Gagal menyiapkan chain firewall $FW_CHAIN."
         return 1
     fi
 
     # MSS clamping must come before accept rules so matching SYN packets reach it.
     if ! nft add rule inet fw4 "$FW_CHAIN" oifname "$TUN_DEV" tcp flags syn tcp option maxseg size set rt mtu; then
-        log_warning "MSS clamping is not supported by fw4."
+        log_warning "MSS clamping tidak didukung oleh fw4."
     fi
 
     if ! nft add rule inet fw4 "$FW_CHAIN" iifname "$LAN_IF" oifname "$TUN_DEV" accept ||
        ! nft add rule inet fw4 "$FW_CHAIN" iifname "$TUN_DEV" oifname "$LAN_IF" accept; then
-        log_error "Unable to add firewall forwarding rules."
+        log_error "Gagal menambahkan aturan forwarding firewall."
         return 1
     fi
 
     if ! nft -a list chain inet fw4 forward 2>/dev/null | grep -q "jump $FW_CHAIN"; then
         if ! nft insert rule inet fw4 forward jump "$FW_CHAIN"; then
-            log_error "Unable to attach $FW_CHAIN to the fw4 forward chain."
+            log_error "Gagal menautkan $FW_CHAIN ke chain forward fw4."
             return 1
         fi
     fi
@@ -391,7 +393,7 @@ setup_fw4() {
     if ! nft -a list chain inet fw4 srcnat 2>/dev/null |
          grep -q "oifname \"$TUN_DEV\" masquerade"; then
         if ! nft add rule inet fw4 srcnat oifname "$TUN_DEV" masquerade; then
-            log_error "Unable to add masquerading for $TUN_DEV."
+            log_error "Gagal menambahkan aturan masquerade untuk $TUN_DEV."
             return 1
         fi
     fi
@@ -500,19 +502,19 @@ EOF
 
 start_routing() {
     if [ ! -x "$TUN2SOCKS_BIN" ]; then
-        log_error "$TUN2SOCKS_BIN is missing or not executable."
+        log_error "$TUN2SOCKS_BIN tidak ditemukan atau tidak executable."
         return 1
     fi
     if ! command -v nft >/dev/null 2>&1 || ! command -v ip >/dev/null 2>&1; then
-        log_error "Required command 'nft' or 'ip' was not found."
+        log_error "Perintah 'nft' atau 'ip' tidak ditemukan."
         return 1
     fi
     if [ -z "$DNS_RESOLVER_IPS" ]; then
-        log_error "DNS resolver endpoint has no resolved IPv4 address. Routing cancelled to prevent a loop."
+        log_error "Alamat IPv4 resolver DNS tidak tersedia. Routing dibatalkan untuk mencegah loop."
         return 1
     fi
     if ip link show "$TUN_DEV" >/dev/null 2>&1; then
-        log_error "$TUN_DEV is already in use. Stop the other service using tun0 (Passwall/OpenVPN) and try again."
+        log_error "Interface $TUN_DEV sedang digunakan layanan lain (Passwall/OpenVPN). Hentikan layanan tersebut terlebih dahulu."
         return 1
     fi
 
@@ -526,33 +528,33 @@ start_routing() {
         return 1
     fi
     if ! port_listening "$SOCKS_PORT"; then
-        log_error "SOCKS5 proxy $SOCKS_ADDR is not listening."
+        log_error "Proxy SOCKS5 di $SOCKS_ADDR tidak aktif."
         return 1
     fi
 
     detect_network
     if [ -z "$WAN_IF" ]; then
-        log_error "No upstream default route was found."
+        log_error "Rute default upstream (internet) tidak ditemukan."
         return 1
     fi
     if [ -z "$LAN_SUBNET" ]; then
-        log_warning "LAN subnet could not be detected; some local LAN traffic may be routed through the tunnel."
+        log_warning "Subnet LAN tidak terdeteksi; sebagian trafik lokal mungkin ikut melewati tunnel."
     fi
 
     _fo=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
     _foh=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
     if [ "$_fo" = "1" ] || [ "$_foh" = "1" ]; then
-        log_warning "Firewall flow offloading is enabled and may bypass nftables packet marks. Disable flow offloading for this connection."
+        log_warning "Firewall flow offloading aktif dan dapat melewati penandaan paket nftables. Sebaiknya nonaktifkan flow offloading."
     fi
 
     if ! ip tuntap add mode tun dev "$TUN_DEV"; then
-        log_error "Unable to create TUN interface $TUN_DEV."
+        log_error "Gagal membuat interface TUN $TUN_DEV."
         return 1
     fi
     : > "$TUN_CREATED"
 
     if ! ip addr add "$TUN_IP" dev "$TUN_DEV" || ! ip link set "$TUN_DEV" up; then
-        routing_fail "Unable to configure or bring up TUN interface $TUN_DEV."
+        routing_fail "Gagal mengonfigurasi atau mengaktifkan interface $TUN_DEV."
         return 1
     fi
     relax_rp_filter
@@ -567,13 +569,13 @@ start_routing() {
     printf '%s\n' "$_pid" > "$TUN2SOCKS_PID"
     sleep 1
     if ! kill -0 "$_pid" 2>/dev/null; then
-        routing_fail "BadVPN tun2socks failed to start."
+        routing_fail "BadVPN tun2socks gagal dijalankan."
         return 1
     fi
 
     if [ -n "$LAN_SUBNET" ]; then
         if ! ip route replace "$LAN_SUBNET" dev "$LAN_IF" table "$ROUTE_TABLE"; then
-            routing_fail "Unable to add LAN route $LAN_SUBNET."
+            routing_fail "Gagal menambahkan rute LAN $LAN_SUBNET."
             return 1
         fi
     fi
@@ -582,19 +584,19 @@ start_routing() {
     for _resolver_ip in $DNS_RESOLVER_IPS; do
         if [ -n "$WAN_GW" ]; then
             if ! ip route replace "$_resolver_ip/32" via "$WAN_GW" dev "$WAN_IF" table "$ROUTE_TABLE"; then
-                routing_fail "Unable to bypass DNS endpoint $_resolver_ip through gateway $WAN_GW."
+                routing_fail "Gagal melewati bypass endpoint DNS $_resolver_ip melalui gateway $WAN_GW."
                 return 1
             fi
         else
             if ! ip route replace "$_resolver_ip/32" dev "$WAN_IF" table "$ROUTE_TABLE"; then
-                routing_fail "Unable to bypass DNS endpoint $_resolver_ip through interface $WAN_IF."
+                routing_fail "Gagal melewati bypass endpoint DNS $_resolver_ip melalui interface $WAN_IF."
                 return 1
             fi
         fi
     done
 
     if ! ip route replace default dev "$TUN_DEV" table "$ROUTE_TABLE"; then
-        routing_fail "Unable to add the default route to table $ROUTE_TABLE."
+        routing_fail "Gagal menambahkan rute default pada tabel $ROUTE_TABLE."
         return 1
     fi
 
@@ -604,21 +606,21 @@ start_routing() {
 
     for _resolver_ip in $DNS_RESOLVER_IPS; do
         if ! ip rule add pref "$BYPASS_PREF" to "$_resolver_ip/32" table main; then
-            log_warning "Resolver bypass rule for $_resolver_ip is unavailable; nftables and the /32 route will remain in use."
+            log_warning "Aturan bypass resolver untuk $_resolver_ip tidak tersedia; nftables dan rute /32 tetap digunakan."
         fi
     done
     if ! ip rule add pref "$ROUTE_PREF" fwmark "$ROUTE_MARK" table "$ROUTE_TABLE"; then
-        routing_fail "Unable to add the fwmark policy rule."
+        routing_fail "Gagal menambahkan aturan policy fwmark."
         return 1
     fi
 
     if ! apply_nft; then
-        routing_fail "Unable to create nftables table $NFT_TABLE."
+        routing_fail "Gagal membuat tabel nftables $NFT_TABLE."
         return 1
     fi
 
     if ! setup_fw4; then
-        routing_fail "Unable to allow forwarding between LAN and $TUN_DEV in fw4."
+        routing_fail "Gagal mengizinkan forwarding antara LAN dan $TUN_DEV pada fw4."
         return 1
     fi
 
@@ -628,25 +630,36 @@ start_routing() {
 
 routing_watchdog() {
     if ! nft list table inet "$NFT_TABLE" >/dev/null 2>&1; then
-        route_log "nftables table $NFT_TABLE is missing."
+        route_log "Tabel nftables $NFT_TABLE hilang."
         return 1
     fi
     if ! nft -a list chain inet fw4 forward 2>/dev/null | grep -q "jump $FW_CHAIN" ||
        ! nft -a list chain inet fw4 srcnat 2>/dev/null | grep -q "oifname \"$TUN_DEV\" masquerade"; then
-        route_log "fw4 forwarding or masquerade hook is missing; restoring it."
+        route_log "Aturan forwarding atau masquerade fw4 hilang; memulihkan kembali."
         setup_fw4 || return 1
     fi
+
+    if [ -f "$DNSTT_LOG" ]; then
+        _dnstt_log_size=$(wc -c < "$DNSTT_LOG" 2>/dev/null | tr -d '[:space:]')
+        case "$_dnstt_log_size" in
+            ""|*[!0-9]*) _dnstt_log_size=0 ;;
+        esac
+        if [ "$_dnstt_log_size" -gt 65536 ]; then
+            : > "$DNSTT_LOG"
+        fi
+    fi
+
     return 0
 }
 
 start_dnstt_client() {
     if [ ! -x "$DNSTT_BIN" ]; then
-        log_error "DNSTT client binary $DNSTT_BIN is missing or not executable."
+        log_error "Binary DNSTT client $DNSTT_BIN tidak ditemukan atau tidak executable."
         return 1
     fi
     if [ -f "$DNSTT_SERVER_PUBLIC_KEY" ]; then
         [ -r "$DNSTT_SERVER_PUBLIC_KEY" ] || {
-            log_error "Public key file cannot be read."
+            log_error "File Public Key tidak dapat dibaca."
             return 1
         }
         _key_option="-pubkey-file"
@@ -654,18 +667,20 @@ start_dnstt_client() {
         _key_option="-pubkey"
     fi
 
+    : > "$DNSTT_LOG"
+
     case "$DNS_TRANSPORT" in
         UDP)
-            "$DNSTT_BIN" -httpcustom -qtype "$DNS_QTYPE" -kcp-window 512 -udp "$DNS_RESOLVER:53" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >/dev/null 2>&1 &
+            "$DNSTT_BIN" -httpcustom -qtype "$DNS_QTYPE" -kcp-window 512 -udp "$DNS_RESOLVER:53" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >> "$DNSTT_LOG" 2>&1 &
             ;;
         DOH)
-            "$DNSTT_BIN" -doh "$DNS_RESOLVER" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >/dev/null 2>&1 &
+            "$DNSTT_BIN" -doh "$DNS_RESOLVER" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >> "$DNSTT_LOG" 2>&1 &
             ;;
         DOT)
-            "$DNSTT_BIN" -dot "$DNS_RESOLVER" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >/dev/null 2>&1 &
+            "$DNSTT_BIN" -dot "$DNS_RESOLVER" "$_key_option" "$DNSTT_SERVER_PUBLIC_KEY" "$DNSTT_DOMAIN" "$DNSTT_LOCAL_ADDR" >> "$DNSTT_LOG" 2>&1 &
             ;;
         *)
-            log_error "Unsupported DNS transport: $DNS_TRANSPORT"
+            log_error "Transport DNS tidak didukung: $DNS_TRANSPORT"
             return 1
             ;;
     esac
@@ -675,7 +690,8 @@ start_dnstt_client() {
     if ! kill -0 "$DNSTT_PID" 2>/dev/null; then
         wait "$DNSTT_PID" 2>/dev/null
         _dnstt_rc=$?
-        log_error "DNSTT client stopped during startup (exit code $_dnstt_rc)."
+        log_error "DNSTT client berhenti saat startup (exit code $_dnstt_rc)."
+        diagnose_dnstt_failure "early_exit"
         DNSTT_PID=""
         return 1
     fi
@@ -684,6 +700,90 @@ start_dnstt_client() {
 
 dnstt_ready() {
     port_listening "$DNSTT_LOCAL_PORT"
+}
+
+diagnose_dnstt_failure() {
+    _phase="${1:-timeout}"
+    [ -s "$DNSTT_LOG" ] || {
+        if [ "$DNS_TRANSPORT" = "UDP" ]; then
+            log_error "Tidak ada respons (RX) sama sekali dari resolver $DNS_RESOLVER:53. Kemungkinan UDP:53 diblokir atau DNS resolver sedang mati. Silakan ganti DNS resolver."
+        else
+            log_error "Tidak ada respons (RX) dari endpoint $DNS_TRANSPORT ($DNS_RESOLVER). Periksa koneksi internet atau ganti resolver."
+        fi
+        return 0
+    }
+
+    if grep -Eiq 'address already in use' "$DNSTT_LOG" 2>/dev/null; then
+        log_error "Port lokal $DNSTT_LOCAL_ADDR sudah digunakan oleh proses lain. Hentikan proses tersebut lalu coba lagi."
+        return 0
+    fi
+
+    if grep -Eiq 'pubkey|public key|hex|decode' "$DNSTT_LOG" 2>/dev/null && ! grep -qE '(^|[[:space:]])RX([[:space:]:=]|$)' "$DNSTT_LOG" 2>/dev/null; then
+        log_error "Format Public Key tidak valid atau gagal dimuat. Periksa kembali Public Key server SlowDNS Anda."
+        return 0
+    fi
+
+    if grep -Eiq 'permission denied|operation not permitted' "$DNSTT_LOG" 2>/dev/null; then
+        log_error "Akses jaringan atau bind port ditolak sistem (permission denied)."
+        return 0
+    fi
+
+    # 1. Ada RX payload > 0B namun port lokal 127.0.0.1:2222 gagal terbuka
+    if awk '/RX/ && /payload=[1-9][0-9]*B?([^0-9]|$)/ { found=1; exit } END { exit !found }' "$DNSTT_LOG" 2>/dev/null; then
+        log_error "Data payload dari server sudah diterima (RX payload>0B), namun port lokal $DNSTT_LOCAL_ADDR tidak kunjung terbuka. Kemungkinan Public Key tidak cocok atau terjadi loss/timeout pada Noise handshake."
+        return 0
+    fi
+
+    # 2. RX rcode=0, answers>=1, namun payload=0B -> QTYPE tidak cocok
+    if awk '/RX/ && /rcode=0([^0-9]|$)/ && /answers=[1-9][0-9]*([^0-9]|$)/ && /payload=0B?([^0-9]|$)/ { found=1; exit } END { exit !found }' "$DNSTT_LOG" 2>/dev/null; then
+        log_error "Server merespons query DNS (rcode=0, answers>=1) namun payload kosong (0B). QTYPE ($DNS_QTYPE) kemungkinan tidak cocok dengan balasan server. Silakan ganti QTYPE atau gunakan mode AUTO."
+        return 0
+    fi
+
+    # 3. RX dengan rcode=2 / 3 / 5
+    _bad_rcode=$(awk '/RX/ && match($0, /rcode=(2|3|5)([^0-9]|$)/) {
+        s = substr($0, RSTART + 6, RLENGTH - 6);
+        gsub(/[^0-9]/, "", s);
+        if (s != "") { print s; exit }
+    }' "$DNSTT_LOG" 2>/dev/null)
+
+    if [ -n "$_bad_rcode" ]; then
+        case "$_bad_rcode" in
+            3)
+                log_error "Resolver mengembalikan RX rcode=3 (NXDOMAIN). Domain Name Server ($DNSTT_DOMAIN) tidak ditemukan atau pengaturan NS server SlowDNS bermasalah."
+                ;;
+            5)
+                log_error "Resolver menolak permintaan DNS (RX rcode=5 / REFUSED). Silakan ganti DNS resolver lain."
+                ;;
+            2)
+                log_error "Kegagalan resolusi DNS (RX rcode=2 / SERVFAIL). Kemungkinan server SlowDNS tidak aktif, domain NS bermasalah, atau resolver gagal meneruskan query."
+                ;;
+        esac
+        return 0
+    fi
+
+    # 4. Tidak ada RX sama sekali
+    if ! grep -qE '(^|[[:space:]])RX([[:space:]:=]|$)' "$DNSTT_LOG" 2>/dev/null; then
+        if [ "$DNS_TRANSPORT" = "UDP" ]; then
+            log_error "Tidak ada RX sama sekali dari $DNS_RESOLVER:53. Kemungkinan port UDP:53 diblokir oleh ISP atau DNS resolver sedang mati. Silakan ganti DNS resolver."
+        else
+            log_error "Tidak ada RX sama sekali dari endpoint $DNS_TRANSPORT ($DNS_RESOLVER). Periksa koneksi internet, URL/port resolver, atau sertifikat TLS."
+        fi
+        return 0
+    fi
+
+    # 5. Ada RX namun tidak ada jawaban valid (misalnya rcode=0 answers=0 atau rcode lain)
+    _other_rcode=$(awk '/RX/ && match($0, /rcode=[1-9][0-9]*/) {
+        s = substr($0, RSTART + 6, RLENGTH - 6);
+        if (s != "") { print s; exit }
+    }' "$DNSTT_LOG" 2>/dev/null)
+    if [ -n "$_other_rcode" ]; then
+        log_error "Server/resolver mengembalikan error DNS (RX rcode=$_other_rcode). Periksa status server SlowDNS, domain NS, atau ganti resolver."
+    else
+        log_error "Respons DNS diterima namun belum ada jawaban tunnel yang valid (answers=0). Periksa domain Name Server ($DNSTT_DOMAIN), QTYPE, atau coba ganti DNS resolver."
+    fi
+
+    return 0
 }
 
 wait_ssh_banner_output() {
@@ -744,8 +844,6 @@ log_server_banner() {
 
     _banner_clean="$RUN/ssh-banner-clean.txt"
 
-    # Remove HTML/Pango tags even when a tag is split across input lines.
-    # HTML line-break/block tags are converted to line breaks.
     awk '
     BEGIN {
         in_tag = 0
@@ -810,7 +908,6 @@ log_server_banner() {
     while IFS= read -r _line || [ -n "$_line" ]; do
         [ -n "$_line" ] || continue
 
-        # Keep the banner as plain text; escape markup for the log renderer.
         _safe_line=$(printf '%s' "$_line" | sed \
             -e 's/&/\&amp;/g' \
             -e 's/</\&lt;/g' \
@@ -827,19 +924,23 @@ ssh_connection_timed_out() {
 
 log_ssh_failure_details() {
     if grep -Eiq 'Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|Offending .* key' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH host key verification failed."
+        log_error "Verifikasi host key SSH gagal."
     elif grep -Eiq 'Permission denied|Authentication failed' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH login rejected; check the username, password, and server password-authentication policy."
+        log_error "Login SSH ditolak oleh server. Silakan periksa kembali Username, Password, atau kebijakan login password pada server."
+    elif grep -Eiq 'Too many authentication failures' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
+        log_error "Terlalu banyak percobaan autentikasi SSH yang gagal."
     elif grep -Eiq 'Connection timed out|Operation timed out|Timeout, server .* not responding' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH connection timed out."
+        log_error "Koneksi ke server SSH mengalami timeout melalui tunnel DNSTT."
     elif grep -Eiq 'Connection refused' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH connection was refused by the DNSTT destination."
+        log_error "Koneksi ditolak oleh layanan SSH tujuan. Pastikan port SSH pada server SlowDNS aktif."
+    elif grep -Eiq 'kex_exchange_identification|banner exchange|Connection reset by peer|closed by remote host' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
+        log_error "Koneksi terputus saat negosiasi SSH (kemungkinan loss/latensi tinggi pada jalur DNSTT atau server menutup koneksi)."
     elif grep -Eiq 'No route to host|Network is unreachable' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH destination is unreachable through DNSTT."
+        log_error "Server SSH tujuan tidak dapat dijangkau melalui DNSTT."
     elif grep -Eiq 'Address already in use|forwarding failed' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
-        log_error "SSH SOCKS5 forward failed (port $SOCKS_PORT may already be in use)."
+        log_error "Gagal membuka port SOCKS5 lokal (port $SOCKS_PORT kemungkinan sedang digunakan proses lain)."
     else
-        log_error "SSH handshake failed; detailed diagnostics are kept in $SSH_LOG."
+        log_error "Handshake SSH gagal; detail diagnostik tersimpan di $SSH_LOG."
     fi
 }
 
@@ -854,13 +955,13 @@ stop_children() {
 on_signal() {
     STOPPING=1
     write_status "STOPPING"
-    log "Stopping service and cleaning routing rules..."
+    log "Menghentikan layanan dan membersihkan aturan routing..."
     stop_children
 }
 
 trap on_signal TERM INT
 
-log_success "Starting Service"
+log_success "Memulai Layanan SlowDNS"
 stop_routing
 detect_network
 if [ -n "$WAN_IF" ]; then
@@ -877,32 +978,35 @@ fi
 
 END_STATUS="DISCONNECTED"
 if ! command -v sshpass >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then
-    log_error "Required command 'sshpass' or OpenSSH 'ssh' was not found."
+    log_error "Perintah 'sshpass' atau OpenSSH 'ssh' tidak ditemukan."
     END_STATUS="ERROR"
 elif ssh -V 2>&1 | grep -qi dropbear; then
-    log_error "OpenSSH client is required; Dropbear ssh client does not support -D/-E options."
+    log_error "Diperlukan OpenSSH client; Dropbear ssh client tidak mendukung opsi -D/-E."
     END_STATUS="ERROR"
 elif ! uci -q get "$UCI_PACKAGE.$UCI_SECTION.enabled" >/dev/null 2>&1; then
-    log_error "SlowDNS configuration was not found at /etc/config/$UCI_PACKAGE (section $UCI_SECTION)."
+    log_error "Konfigurasi SlowDNS tidak ditemukan di /etc/config/$UCI_PACKAGE (section $UCI_SECTION)."
     END_STATUS="ERROR"
 else
     while [ "$STOPPING" = "0" ]; do
         write_status "STARTING"
         if ! read_config; then
-            log_error "SlowDNS configuration is invalid: ${CONFIG_ERROR:-check UCI section $UCI_PACKAGE.$UCI_SECTION}."
+            log_error "Konfigurasi SlowDNS tidak valid: ${CONFIG_ERROR:-periksa UCI $UCI_PACKAGE.$UCI_SECTION}."
             write_status "ERROR"
             END_STATUS="ERROR"
             break
         else
             READY=0
+            DNSTT_EARLY_EXIT=0
             if start_dnstt_client; then
                 count=0
                 while [ "$count" -lt 30 ] && [ "$STOPPING" = "0" ]; do
                     if ! kill -0 "$DNSTT_PID" 2>/dev/null; then
                         wait "$DNSTT_PID" 2>/dev/null
                         _dnstt_rc=$?
-                        log_error "DNSTT client exited before opening its local listener (exit code $_dnstt_rc)."
+                        log_error "DNSTT client berhenti sebelum membuka listener lokal (exit code $_dnstt_rc)."
+                        diagnose_dnstt_failure "early_exit"
                         DNSTT_PID=""
+                        DNSTT_EARLY_EXIT=1
                         break
                     fi
                     if dnstt_ready; then
@@ -912,10 +1016,12 @@ else
                     sleep 1
                     count=$((count + 1))
                 done
+            else
+                DNSTT_EARLY_EXIT=1
             fi
 
             if [ "$READY" = "1" ] && [ "$STOPPING" = "0" ]; then
-                printf '[%s] DNSTT listener is ready\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG"
+                printf '[%s] DNSTT listener siap di %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$DNSTT_LOCAL_ADDR" >> "$LOG"
                 : > "$SSH_LOG"
                 : > "$SSH_OUTPUT_LOG"
                 export SSHPASS="$SSH_PASSWORD"
@@ -923,7 +1029,7 @@ else
                 sshpass -e ssh -l "$SSH_USERNAME" 127.0.0.1 \
                     -p "$DNSTT_LOCAL_PORT" \
                     -v -E "$SSH_LOG" -N -D "$SOCKS_ADDR" \
-                    -o ConnectTimeout=20 \
+                    -o ConnectTimeout=10 \
                     -o ExitOnForwardFailure=yes \
                     -o ServerAliveInterval=15 \
                     -o ServerAliveCountMax=3 \
@@ -940,7 +1046,7 @@ else
 
                 SSH_PID=$!
                 unset SSHPASS SSH_PASSWORD
-                log "Starting SSH handshake and password authentication."
+                log "Memulai handshake SSH dan autentikasi akun..."
 
                 count=0
                 AUTH_OK=0
@@ -988,7 +1094,7 @@ else
                     done
 
                     if [ "$SOCKS_OK" != "1" ] && [ "$STOPPING" = "0" ]; then
-                        log_error "SSH authenticated, but SOCKS5 did not open on $SOCKS_ADDR."
+                        log_error "Login SSH berhasil, tetapi port SOCKS5 tidak terbuka di $SOCKS_ADDR."
                     fi
                 fi
 
@@ -997,7 +1103,7 @@ else
                    kill -0 "$SSH_PID" 2>/dev/null &&
                    kill -0 "$DNSTT_PID" 2>/dev/null &&
                    [ "$STOPPING" = "0" ]; then
-                    log_success "SSH authentication successful. Preparing VPN routes."
+                    log_success "Autentikasi SSH berhasil. Menyiapkan rute VPN..."
                     if start_routing; then
                         log_success "Service Started"
                         write_status "CONNECTED"
@@ -1015,21 +1121,22 @@ else
                             sleep 1
                         done
                         if [ "$STOPPING" = "0" ]; then
-                            pid_alive "$TUN2SOCKS_PID" || route_log "BadVPN tun2socks process stopped."
-                            log "SSH, DNSTT, or VPN routing stopped. Reconnecting."
+                            pid_alive "$TUN2SOCKS_PID" || route_log "Proses BadVPN tun2socks berhenti."
+                            log "Koneksi SSH, DNSTT, atau rute VPN terputus. Mencoba menghubungkan ulang..."
                         fi
                     else
-                        log_warning "VPN route setup failed. The connection will be retried."
+                        log_warning "Pengaturan rute VPN gagal. Koneksi akan dicoba ulang."
                     fi
                 else
                     if [ "$STOPPING" = "0" ]; then
                         if [ "$AUTH_OK" != "1" ]; then
                             if [ "$SSH_WAIT_TIMEOUT" = "1" ] || ssh_connection_timed_out; then
                                 SSH_TIMEOUT_COUNT=$((SSH_TIMEOUT_COUNT + 1))
-                                log_error "SSH connection timed out ($SSH_TIMEOUT_COUNT/$SSH_TIMEOUT_LIMIT)."
+                                log_error "Koneksi/login SSH timeout ($SSH_TIMEOUT_COUNT/$SSH_TIMEOUT_LIMIT)."
+                                diagnose_dnstt_failure "ssh_timeout"
 
                                 if [ "$SSH_TIMEOUT_COUNT" -ge "$SSH_TIMEOUT_LIMIT" ]; then
-                                    log_warning "SSH timed out 10 times. Try Airplane Mode to get a new IP, or check your SSH account. SlowDNS is stopping."
+                                    log_warning "Login SSH gagal timeout sebanyak $SSH_TIMEOUT_LIMIT kali. Coba lakukan Mode Pesawat untuk mendapatkan IP baru atau periksa akun SSH Anda. Layanan SlowDNS dihentikan."
                                     AUTO_STOP=1
                                     STOPPING=1
                                     END_STATUS="STOPPED"
@@ -1042,13 +1149,14 @@ else
                         elif [ "$SOCKS_OK" != "1" ]; then
                             :
                         else
-                            log_error "SSH or DNSTT process stopped before VPN routing could start."
+                            log_error "Proses SSH atau DNSTT berhenti sebelum rute VPN dapat dijalankan."
                         fi
                     fi
                 fi
             else
-                if [ "$STOPPING" = "0" ] && [ -n "$DNSTT_PID" ]; then
-                    log_error "DNSTT did not open its local listener within 30 seconds."
+                if [ "$STOPPING" = "0" ] && [ "$DNSTT_EARLY_EXIT" != "1" ]; then
+                    log_error "DNSTT tidak membuka listener lokal ($DNSTT_LOCAL_ADDR) dalam 30 detik."
+                    diagnose_dnstt_failure "timeout"
                 fi
             fi
 
@@ -1057,7 +1165,7 @@ else
             fi
             stop_children
             if [ "$STOPPING" = "0" ]; then
-                log "Retrying the SlowDNS connection in 5 seconds."
+                log "Mencoba menghubungkan ulang SlowDNS dalam 5 detik..."
                 sleep 5
             fi
         fi
@@ -1073,7 +1181,7 @@ fi
 stop_children
 write_status "$END_STATUS"
 if [ "$END_STATUS" = "ERROR" ]; then
-    log_error "Service stopped because the SlowDNS configuration or startup failed."
+    log_error "Layanan berhenti karena konfigurasi atau proses startup SlowDNS gagal."
 else
     log_success "Service Stopped."
 fi
