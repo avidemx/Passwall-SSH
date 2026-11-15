@@ -1,6 +1,5 @@
 #!/bin/sh
 # Validate SlowDNS settings directly from the dedicated UCI package.
-# UDP uses HTTP Custom framing; DoH and DoT use standard DNSTT framing.
 
 UCI_PACKAGE="passwall-ssh-slowdns"
 UCI_SECTION="SlowDNS"
@@ -8,7 +7,7 @@ LOG="/tmp/etc/passwall-ssh.log"
 
 log_error() {
     mkdir -p /tmp/etc
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SlowDNS config ERROR: $*" >> "$LOG"
+    printf '<font color="#EF4444">[%s] SlowDNS config ERROR: %s</font>\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"
 }
 
 uci_value() {
@@ -32,7 +31,7 @@ valid_port() {
 
 main() {
     command -v uci >/dev/null 2>&1 || {
-        log_error "The uci command was not found."
+        log_error "Perintah uci tidak ditemukan."
         return 1
     }
 
@@ -47,7 +46,7 @@ main() {
     SSH_PASSWORD=$(uci_value SSH_PASSWORD)
 
     [ "$SLOWDNS_ENABLED" = "1" ] || {
-        log_error "SlowDNS Main Switch is OFF."
+        log_error "SlowDNS Main Switch dalam kondisi mati (OFF)."
         return 1
     }
 
@@ -59,11 +58,12 @@ main() {
     case "$DNS_TRANSPORT" in
         UDP)
             ipv4_ok "$DNS_RESOLVER" || {
-                log_error "UDP DNS resolver must be an IPv4 address."
+                log_error "Resolver DNS UDP harus berupa alamat IPv4 yang valid."
                 return 1
             }
-            [ -n "$DNS_QTYPE" ] || DNS_QTYPE="NS"
+            [ -n "$DNS_QTYPE" ] || DNS_QTYPE="AUTO"
             case "$DNS_QTYPE" in
+                AUTO|Auto|auto) DNS_QTYPE="auto" ;;
                 NS|ns) DNS_QTYPE="ns" ;;
                 TXT|txt) DNS_QTYPE="txt" ;;
                 MX|mx) DNS_QTYPE="mx" ;;
@@ -71,7 +71,7 @@ main() {
                 NULL|null) DNS_QTYPE="null" ;;
                 SRV|srv) DNS_QTYPE="srv" ;;
                 *)
-                    log_error "Unsupported HTTP Custom QTYPE: $DNS_QTYPE. Choose NS, TXT, MX, CNAME, NULL, or SRV."
+                    log_error "QTYPE tidak didukung: $DNS_QTYPE. Pilih AUTO, NS, TXT, MX, CNAME, NULL, atau SRV."
                     return 1
                     ;;
             esac
@@ -80,7 +80,7 @@ main() {
             case "$DNS_RESOLVER" in
                 https://*) ;;
                 *)
-                    log_error "DoH resolver must be a complete HTTPS URL, for example https://cloudflare-dns.com/dns-query."
+                    log_error "Resolver DoH harus berupa URL HTTPS lengkap, misalnya https://cloudflare-dns.com/dns-query."
                     return 1
                     ;;
             esac
@@ -90,14 +90,14 @@ main() {
             DNS_AUTHORITY=${DNS_AUTHORITY%%#*}
             DNS_HOST=${DNS_AUTHORITY%%:*}
             host_ok "$DNS_HOST" || {
-                log_error "DoH URL contains an invalid or empty hostname."
+                log_error "URL DoH mengandung nama host yang kosong atau tidak valid."
                 return 1
             }
             case "$DNS_AUTHORITY" in
                 *:*)
                     DNS_PORT=${DNS_AUTHORITY##*:}
                     valid_port "$DNS_PORT" || {
-                        log_error "DoH URL port must be between 1 and 65535."
+                        log_error "Port pada URL DoH harus antara 1 sampai 65535."
                         return 1
                     }
                     ;;
@@ -116,65 +116,65 @@ main() {
                     ;;
             esac
             host_ok "$DNS_HOST" || {
-                log_error "DoT resolver must be a hostname or IPv4 address, optionally followed by :853."
+                log_error "Resolver DoT harus berupa hostname atau alamat IPv4 (opsional diikuti :853)."
                 return 1
             }
             valid_port "$DNS_PORT" || {
-                log_error "DoT port must be between 1 and 65535."
+                log_error "Port DoT harus antara 1 sampai 65535."
                 return 1
             }
             ;;
         *)
-            log_error "Unsupported DNS transport '$DNS_TRANSPORT'. Choose UDP, DoH, or DoT."
+            log_error "Transport DNS '$DNS_TRANSPORT' tidak didukung. Pilih UDP, DoH, atau DoT."
             return 1
             ;;
     esac
 
     [ -n "$DNSTT_DOMAIN" ] || {
-        log_error "DNSTT domain is missing."
+        log_error "Name Server (domain DNSTT) belum diisi."
         return 1
     }
     printf '%s\n' "$DNSTT_DOMAIN" | grep -qE '^[A-Za-z0-9.-]+$' || {
-        log_error "DNSTT domain contains invalid characters."
+        log_error "Name Server (domain DNSTT) mengandung karakter yang tidak valid."
         return 1
     }
 
     [ -n "$DNSTT_SERVER_PUBLIC_KEY" ] || {
-        log_error "Public key is missing."
+        log_error "Public Key belum diisi."
         return 1
     }
 
     case "$DNSTT_SERVER_PUBLIC_KEY" in
         /*)
             [ -r "$DNSTT_SERVER_PUBLIC_KEY" ] || {
-                log_error "Public key file does not exist or cannot be read."
+                log_error "File Public Key tidak ditemukan atau tidak dapat dibaca."
                 return 1
             }
             ;;
         *)
             printf '%s' "$DNSTT_SERVER_PUBLIC_KEY" | grep -qE '^[[:xdigit:]]{64}$' || {
-                log_error "Public key must be an absolute file path or a 64-character hexadecimal value."
+                log_error "Public Key harus berupa path file absolut atau 64 karakter heksadesimal."
                 return 1
             }
             ;;
     esac
 
     [ -n "$SSH_USERNAME" ] || {
-        log_error "SSH username is missing."
+        log_error "Username SSH belum diisi."
         return 1
     }
     printf '%s\n' "$SSH_USERNAME" | grep -qE '^[A-Za-z0-9._-]+$' || {
-        log_error "SSH username contains invalid characters."
+        log_error "Username SSH mengandung karakter yang tidak valid."
         return 1
     }
 
     [ -n "$SSH_PASSWORD" ] || {
-        log_error "SSH password is missing."
+        log_error "Password SSH belum diisi."
         return 1
     }
 
     mkdir -p /tmp/etc || {
-        log_error "Unable to create the log directory."
+        log_error "Gagal membuat direktori log."
         return 1
     }
 
