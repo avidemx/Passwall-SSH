@@ -45,6 +45,7 @@ rm -f /tmp/etc/passwall-ssh-slowdns-dnstt.log /tmp/etc/passwall-ssh-slowdns-rout
 SSH_PID=""
 DNSTT_PID=""
 STOPPING=0
+SSH_AUTH_TIMEOUT=25
 SSH_TIMEOUT_LIMIT=10
 SSH_TIMEOUT_COUNT=0
 AUTO_STOP=0
@@ -298,7 +299,7 @@ ipv4_ok() {
 
 port_listening() {
     _port="$1"
-    { netstat -ln 2>/dev/null; ss -ln 2>/dev/null; } |
+    { netstat -lnt 2>/dev/null; ss -lnt 2>/dev/null; } |
         grep -E "[:.]$_port([^0-9]|$)" >/dev/null 2>&1
 }
 
@@ -321,7 +322,9 @@ detect_network() {
     [ -n "$LAN_IF" ] || LAN_IF=$(uci -q get network.lan.ifname)
     [ -n "$LAN_IF" ] || LAN_IF="br-lan"
 
-    LAN_SUBNET=$(ip -4 route show dev "$LAN_IF" 2>/dev/null |
+    LAN_SUBNET=$(ip -4 route show dev "$LAN_IF" proto kernel scope link 2>/dev/null |
+        awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { print $1; exit }')
+    [ -n "$LAN_SUBNET" ] || LAN_SUBNET=$(ip -4 route show dev "$LAN_IF" 2>/dev/null |
         awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { print $1; exit }')
 
     _def=$(ip -4 route show default 2>/dev/null | awk 'NR == 1 { print; exit }')
@@ -331,8 +334,11 @@ detect_network() {
     WAN_IF=$(printf '%s\n' "$_def" | awk '{
         for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }
     }')
-    WAN_IP=$(ip -4 -o addr show dev "$WAN_IF" 2>/dev/null |
-        awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')
+    WAN_IP=""
+    if [ -n "$WAN_IF" ]; then
+        WAN_IP=$(ip -4 -o addr show dev "$WAN_IF" 2>/dev/null |
+            awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')
+    fi
 }
 
 cleanup_fw4() {
@@ -348,12 +354,13 @@ cleanup_fw4() {
     nft flush chain inet fw4 "$FW_CHAIN" 2>/dev/null
     nft delete chain inet fw4 "$FW_CHAIN" 2>/dev/null
 
-    _handle=$(nft -a list chain inet fw4 srcnat 2>/dev/null |
-        grep "oifname \"$TUN_DEV\" masquerade" |
-        awk '{ print $NF; exit }')
-    if [ -n "$_handle" ]; then
-        nft delete rule inet fw4 srcnat handle "$_handle" 2>/dev/null
-    fi
+    while true; do
+        _handle=$(nft -a list chain inet fw4 srcnat 2>/dev/null |
+            grep "oifname \"$TUN_DEV\" masquerade" |
+            awk '{ print $NF; exit }')
+        [ -n "$_handle" ] || break
+        nft delete rule inet fw4 srcnat handle "$_handle" 2>/dev/null || break
+    done
 }
 
 setup_fw4() {
@@ -363,14 +370,15 @@ setup_fw4() {
         return 1
     fi
 
+    # MSS clamping must come before accept rules so matching SYN packets reach it.
+    if ! nft add rule inet fw4 "$FW_CHAIN" oifname "$TUN_DEV" tcp flags syn tcp option maxseg size set rt mtu; then
+        log_warning "MSS clamping is not supported by fw4."
+    fi
+
     if ! nft add rule inet fw4 "$FW_CHAIN" iifname "$LAN_IF" oifname "$TUN_DEV" accept ||
        ! nft add rule inet fw4 "$FW_CHAIN" iifname "$TUN_DEV" oifname "$LAN_IF" accept; then
         log_error "Unable to add firewall forwarding rules."
         return 1
-    fi
-
-    if ! nft add rule inet fw4 "$FW_CHAIN" oifname "$TUN_DEV" tcp flags syn tcp option maxseg size set rt mtu; then
-        log_warning "MSS clamping is not supported by fw4."
     fi
 
     if ! nft -a list chain inet fw4 forward 2>/dev/null | grep -q "jump $FW_CHAIN"; then
@@ -417,9 +425,9 @@ stop_routing() {
         rm -f "$TUN2SOCKS_PID"
     fi
 
-    ip rule del pref "$BYPASS_PREF" 2>/dev/null
-    ip rule del pref "$ROUTE_PREF" 2>/dev/null
-    ip rule del fwmark "$ROUTE_MARK" table "$ROUTE_TABLE" 2>/dev/null
+    while ip rule del pref "$BYPASS_PREF" 2>/dev/null; do :; done
+    while ip rule del pref "$ROUTE_PREF" 2>/dev/null; do :; done
+    while ip rule del fwmark "$ROUTE_MARK" table "$ROUTE_TABLE" 2>/dev/null; do :; done
     ip route flush table "$ROUTE_TABLE" 2>/dev/null
 
     cleanup_fw4
@@ -478,12 +486,11 @@ add rule inet $NFT_TABLE output ip daddr $WAN_GW accept
 EOF
         fi
 
-        # Keep the Passwall-SSH policy: mark LAN TCP and router TCP/UDP,
-        # while DNSTT resolver, loopback and LAN destinations stay direct.
+        # Mark TCP only because OpenSSH -D and tun2socks (without udpgw) do not forward UDP.
         cat <<EOF
 add rule inet $NFT_TABLE prerouting iifname "$LAN_IF" meta nfproto ipv4 udp dport { 443, 853 } ip daddr != { $_resolver_set } drop
 add rule inet $NFT_TABLE prerouting iifname "$LAN_IF" meta nfproto ipv4 meta l4proto tcp meta mark set $ROUTE_MARK
-add rule inet $NFT_TABLE output meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set $ROUTE_MARK
+add rule inet $NFT_TABLE output meta nfproto ipv4 meta l4proto tcp meta mark set $ROUTE_MARK
 EOF
     } > "$_rules" || return 1
 
@@ -591,9 +598,9 @@ start_routing() {
         return 1
     fi
 
-    ip rule del pref "$BYPASS_PREF" 2>/dev/null
-    ip rule del pref "$ROUTE_PREF" 2>/dev/null
-    ip rule del fwmark "$ROUTE_MARK" table "$ROUTE_TABLE" 2>/dev/null
+    while ip rule del pref "$BYPASS_PREF" 2>/dev/null; do :; done
+    while ip rule del pref "$ROUTE_PREF" 2>/dev/null; do :; done
+    while ip rule del fwmark "$ROUTE_MARK" table "$ROUTE_TABLE" 2>/dev/null; do :; done
 
     for _resolver_ip in $DNS_RESOLVER_IPS; do
         if ! ip rule add pref "$BYPASS_PREF" to "$_resolver_ip/32" table main; then
@@ -624,8 +631,9 @@ routing_watchdog() {
         route_log "nftables table $NFT_TABLE is missing."
         return 1
     fi
-    if ! nft -a list chain inet fw4 forward 2>/dev/null | grep -q "jump $FW_CHAIN"; then
-        route_log "fw4 forwarding hook is missing; restoring it."
+    if ! nft -a list chain inet fw4 forward 2>/dev/null | grep -q "jump $FW_CHAIN" ||
+       ! nft -a list chain inet fw4 srcnat 2>/dev/null | grep -q "oifname \"$TUN_DEV\" masquerade"; then
+        route_log "fw4 forwarding or masquerade hook is missing; restoring it."
         setup_fw4 || return 1
     fi
     return 0
@@ -645,7 +653,6 @@ start_dnstt_client() {
     else
         _key_option="-pubkey"
     fi
-
 
     case "$DNS_TRANSPORT" in
         UDP)
@@ -829,6 +836,8 @@ log_ssh_failure_details() {
         log_error "SSH connection was refused by the DNSTT destination."
     elif grep -Eiq 'No route to host|Network is unreachable' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
         log_error "SSH destination is unreachable through DNSTT."
+    elif grep -Eiq 'Address already in use|forwarding failed' "$SSH_LOG" "$SSH_OUTPUT_LOG" 2>/dev/null; then
+        log_error "SSH SOCKS5 forward failed (port $SOCKS_PORT may already be in use)."
     else
         log_error "SSH handshake failed; detailed diagnostics are kept in $SSH_LOG."
     fi
@@ -867,7 +876,13 @@ if [ -n "$NAME_SERVER" ]; then
 fi
 
 END_STATUS="DISCONNECTED"
-if ! uci -q get "$UCI_PACKAGE.$UCI_SECTION.enabled" >/dev/null 2>&1; then
+if ! command -v sshpass >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then
+    log_error "Required command 'sshpass' or OpenSSH 'ssh' was not found."
+    END_STATUS="ERROR"
+elif ssh -V 2>&1 | grep -qi dropbear; then
+    log_error "OpenSSH client is required; Dropbear ssh client does not support -D/-E options."
+    END_STATUS="ERROR"
+elif ! uci -q get "$UCI_PACKAGE.$UCI_SECTION.enabled" >/dev/null 2>&1; then
     log_error "SlowDNS configuration was not found at /etc/config/$UCI_PACKAGE (section $UCI_SECTION)."
     END_STATUS="ERROR"
 else
@@ -900,24 +915,28 @@ else
             fi
 
             if [ "$READY" = "1" ] && [ "$STOPPING" = "0" ]; then
-                printf '[%s] DNSTT listener is ready.\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG"
+                printf '[%s] DNSTT listener is ready\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG"
                 : > "$SSH_LOG"
                 : > "$SSH_OUTPUT_LOG"
                 export SSHPASS="$SSH_PASSWORD"
 
-                sshpass -e ssh "$SSH_USERNAME@127.0.0.1" \
+                sshpass -e ssh -l "$SSH_USERNAME" 127.0.0.1 \
                     -p "$DNSTT_LOCAL_PORT" \
                     -v -E "$SSH_LOG" -N -D "$SOCKS_ADDR" \
+                    -o ConnectTimeout=20 \
                     -o ExitOnForwardFailure=yes \
-                    -o ServerAliveInterval=30 \
+                    -o ServerAliveInterval=15 \
                     -o ServerAliveCountMax=3 \
-                    -o ConnectTimeout=10 \
-                    -o PreferredAuthentications=password \
+                    -o Compression=no \
+                    -o NumberOfPasswordPrompts=1 \
                     -o PubkeyAuthentication=no \
+                    -o KexAlgorithms=curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256 \
+                    -o HostKeyAlgorithms=ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ssh-rsa \
+                    -o Ciphers=aes128-ctr,aes256-ctr,chacha20-poly1305@openssh.com,aes128-gcm@openssh.com \
+                    -o MACs=hmac-sha2-256,hmac-sha2-512,hmac-sha2-256-etm@openssh.com,hmac-sha1 \
                     -o UserKnownHostsFile=/dev/null \
-                    -o GlobalKnownHostsFile=/dev/null \
                     -o StrictHostKeyChecking=no \
-                    >> "$SSH_OUTPUT_LOG" 2>&1 &
+                    </dev/null >> "$SSH_OUTPUT_LOG" 2>&1 &
 
                 SSH_PID=$!
                 unset SSHPASS SSH_PASSWORD
@@ -927,7 +946,7 @@ else
                 AUTH_OK=0
                 SOCKS_OK=0
                 SSH_WAIT_TIMEOUT=0
-                while [ "$count" -lt "$SSH_TIMEOUT_LIMIT" ] && [ "$STOPPING" = "0" ]; do
+                while [ "$count" -lt "$SSH_AUTH_TIMEOUT" ] && [ "$STOPPING" = "0" ]; do
                     if grep -q "Authenticated to" "$SSH_LOG"; then
                         AUTH_OK=1
                         break
@@ -943,7 +962,7 @@ else
                 done
 
                 if [ "$AUTH_OK" != "1" ] &&
-                   [ "$count" -ge "$SSH_TIMEOUT_LIMIT" ] &&
+                   [ "$count" -ge "$SSH_AUTH_TIMEOUT" ] &&
                    kill -0 "$SSH_PID" 2>/dev/null &&
                    [ "$STOPPING" = "0" ]; then
                     SSH_WAIT_TIMEOUT=1
@@ -955,9 +974,20 @@ else
                     if [ "$STOPPING" = "0" ]; then
                         log_server_banner
                     fi
-                    if port_listening "$SOCKS_PORT"; then
-                        SOCKS_OK=1
-                    else
+
+                    _socks_wait=0
+                    while [ "$_socks_wait" -lt 5 ] &&
+                          [ "$STOPPING" = "0" ] &&
+                          kill -0 "$SSH_PID" 2>/dev/null; do
+                        if port_listening "$SOCKS_PORT"; then
+                            SOCKS_OK=1
+                            break
+                        fi
+                        sleep 1
+                        _socks_wait=$((_socks_wait + 1))
+                    done
+
+                    if [ "$SOCKS_OK" != "1" ] && [ "$STOPPING" = "0" ]; then
                         log_error "SSH authenticated, but SOCKS5 did not open on $SOCKS_ADDR."
                     fi
                 fi
