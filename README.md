@@ -1,124 +1,18 @@
 # Passwall-SSH untuk OpenWrt 24 & 25 🚀
 
-SSH Tunnel ringan untuk OpenWrt dengan dukungan **HTTP Payload**, **TLS (Stunnel)**, **SOCKS5**, dan **BadVPN tun2socks**. Dioptimalkan agar stabil, hemat CPU/RAM, serta memiliki watchdog otomatis untuk menjaga koneksi tetap aktif.
+Klien SSH Tunnel ringan untuk OpenWrt dengan antarmuka LuCI yang mendukung **HTTP Payload**, **TLS (Stunnel)**, **WebSocket**, **SlowDNS (DNSTT)**, dan **BadVPN tun2socks**. Dirancang hemat CPU/RAM serta dilengkapi watchdog otomatis agar koneksi tetap stabil.
 
 ![Screenshot](main.JPG)
 
-## ✨ Fitur
-
-- Mendukung OpenWrt **24 (.ipk)** dan **25 (.apk)**
-- Mendukung berbagai arsitektur router
-- HTTP Payload (GET, POST, CONNECT, WebSocket)
-- HTTP Proxy & TLS (Stunnel)
-- BadVPN tun2socks bawaan
-- Watchdog otomatis & auto reconnect
-- Ringan dan hemat CPU/RAM
-
----
-
-## 🏷️ Token Payload yang Didukung
-
-### Server
-
-```
-[host]
-[server]
-[ssh]
-[ssh_host]
-[ip]
-[host_no_port]
-[port]
-[ssh_port]
-[host_port]
-[ip_port]
-```
-
-### Proxy
-
-```
-[proxy]
-[proxy_host]
-[proxy_port]
-```
-
-### TLS / SNI
-
-```
-[sni]
-[sni_host]
-[sni_port]
-```
-
-### HTTP Request
-
-```
-[method]
-[protocol]
-[raw]
-[real_raw]
-[realData]
-[netData]
-[ua]
-```
-
-### WebSocket
-
-```
-[ws_key]
-[ws-key]
-```
-
-### Karakter Khusus
-
-```
-[crlf]
-[cr]
-[lf]
-```
-
-Mendukung pengulangan:
-
-```
-[crlf*2]
-[crlf*3]
-[lf*5]
-```
-
-### Kontrol Payload
-
-```
-[split]
-[delay_split]
-```
-
-### Rotate & Random
-
-```
-[rotate=a;b;c]
-[random=a;b;c]
-```
-
-> **Catatan:** Nama token **case-sensitive**, sehingga harus ditulis persis seperti di atas.
->
-> ✅ Benar
-> ```
-> [host]
-> [port]
-> [ua]
-> ```
->
-> ❌ Salah
-> ```
-> [HOST]
-> [Host]
-> [PORT]
-> ```
-
----
+## ✨ Fitur Utama
+- Mendukung **OpenWrt 24 (`.ipk`)** dan **OpenWrt 25 (`.apk`)** di berbagai arsitektur router.
+- **Mode SSH HTTP:** HTTP Payload (GET, POST, CONNECT, WebSocket), HTTP Proxy, dan TLS (Stunnel) dengan dukungan token payload (*case-sensitive*).
+- **Mode SlowDNS (DNSTT):** Mendukung transport **UDP**, **DoH**, dan **DoT** dengan pilihan **QTYPE (`AUTO`, `NS`, `TXT`, `MX`, `CNAME`, `NULL`, `SRV`)**.
+- **Built-in `badvpn-tun2socks`:** Lengkap dengan statistik koneksi, cek IP/latensi, monitor *Local IP upstream*, dan auto-reconnect watchdog.
+- **App Update & Log:** Pembaruan paket langsung dari LuCI serta log diagnostik koneksi real-time.
 
 ## 🛠️ Instalasi
-
-Unduh paket yang sesuai pada halaman **Releases**, lalu install melalui SSH.
+Unduh file paket sesuai versi OpenWrt dan arsitektur router dari halaman [**Releases**](https://github.com/avidemx/Passwall-SSH/releases), lalu install melalui SSH:
 
 ```bash
 # OpenWrt 24
