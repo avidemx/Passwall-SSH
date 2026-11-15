@@ -658,7 +658,10 @@ func (c *DNSPacketConn) sendLoop(transport net.PacketConn, addr net.Addr) error 
 			// in response to a received packet. Reset the poll
 			// delay to initial.
 			if !pollTimer.Stop() {
-	            <-pollTimer.C:
+	                select {
+	                case <-pollTimer.C:
+	                default:
+	                }
             }
 			pollDelay = c.initialPollDelay()
 		}
