@@ -3,28 +3,214 @@ local sys = require "luci.sys"
 
 m = Map("passwall-ssh")
 
--- HOOK TRIGGER SAVE & APPLY 
-m.on_after_commit = function(self)
-    self.uci:commit("passwall-ssh")
-    sys.call("/etc/init.d/passwall-ssh enable")
+-- Pastikan section utama (main/sshtls) ada agar NamedSection tidak render kosong
+if not m.uci:get("passwall-ssh", "main") then
+    m.uci:section("passwall-ssh", "sshtls", "main", {
+        enabled = "0",
+        dns_proto = "UDP",
+        dns_ip = "1.1.1.1"
+    })
+    m.uci:save("passwall-ssh")
+    m.uci:commit("passwall-ssh")
+end
+
+-- SlowDNS has its own UCI package. Keep it outside Map("passwall-ssh"):
+-- chaining a package with custom raw-HTML fields can let the main CBI save path
+-- rewrite that package without those fields being parsed as CBI options.
+local slowdns_conf_path = m.uci:get_confdir() .. "/passwall-ssh-slowdns"
+if fs.stat(slowdns_conf_path, "type") ~= "reg" then
+    fs.writefile(slowdns_conf_path, "config slowdns 'SlowDNS'\n")
+end
+
+local slowdns_uci = require("luci.model.uci").cursor()
+slowdns_uci:load("passwall-ssh-slowdns")
+
+-- Chain the independent SlowDNS package so this page can save both packages
+-- directly without invoking LuCI's global configuration-apply overlay.
+m.uci:load("passwall-ssh-slowdns")
+m:chain("passwall-ssh-slowdns")
+
+m.on_before_save = function(self)
+    local requested_mode = luci.http.formvalue("transport_mode_selection")
+    if requested_mode ~= "slowdns" then
+        requested_mode = "ssh"
+    end
+
+    -- The init script defaults to SSH when transport_mode is absent.
+    -- Avoid staging a redundant UCI write when the requested mode is unchanged.
+    local stored_mode = self.uci:get("passwall-ssh", "main", "transport_mode") or "ssh"
+    if stored_mode ~= requested_mode then
+        self.uci:set("passwall-ssh", "main", "transport_mode", requested_mode)
+    end
+
+    -- Stage SlowDNS values in this Map's UCI cursor. The custom Save & Apply
+    -- hook below commits both Passwall-SSH packages directly.
+    if requested_mode == "slowdns" then
+        local function form_value(name, option)
+            local value = luci.http.formvalue(name)
+            if value == nil then
+                value = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", option)
+            end
+            return tostring(value or "")
+        end
+
+        local sd_enabled = luci.http.formvalue("slowdns_enabled") == "1" and "1" or "0"
+        local password = luci.http.formvalue("slowdns_SSH_PASSWORD")
+        if password == nil or password == "" then
+            password = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "SSH_PASSWORD") or ""
+        end
+
+        local dns_transport = string.upper(form_value("slowdns_DNS_TRANSPORT", "DNS_TRANSPORT"))
+        if dns_transport == "DOH" then
+            dns_transport = "DoH"
+        elseif dns_transport == "DOT" then
+            dns_transport = "DoT"
+        else
+            dns_transport = "UDP"
+        end
+        local dns_resolver = form_value("slowdns_DNS_RESOLVER", "DNS_RESOLVER")
+        if dns_resolver == "" then
+            dns_resolver = form_value("slowdns_DNS_UDP_IP", "DNS_UDP_IP")
+        end
+        if dns_resolver == "" then dns_resolver = "1.1.1.1" end
+
+        local legacy_dns_ip = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "DNS_UDP_IP") or "1.1.1.1"
+        if dns_transport == "UDP" then legacy_dns_ip = dns_resolver end
+
+        local slowdns_values = {
+            enabled = sd_enabled,
+            DNS_TRANSPORT = dns_transport,
+            DNS_RESOLVER = dns_resolver,
+            DNS_UDP_IP = legacy_dns_ip,
+            Type_DNS = form_value("slowdns_Type_DNS", "Type_DNS"),
+            DNSTT_DOMAIN = form_value("slowdns_DNSTT_DOMAIN", "DNSTT_DOMAIN"),
+            DNSTT_SERVER_PUBLIC_KEY = form_value("slowdns_DNSTT_SERVER_PUBLIC_KEY", "DNSTT_SERVER_PUBLIC_KEY"),
+            SSH_USERNAME = form_value("slowdns_SSH_USERNAME", "SSH_USERNAME"),
+            SSH_PASSWORD = tostring(password)
+        }
+
+        if not self.uci:get("passwall-ssh-slowdns", "SlowDNS") then
+            self.uci:section("passwall-ssh-slowdns", "slowdns", "SlowDNS", {})
+        end
+
+        -- Remove legacy SSH host/port options from existing UCI configs.
+        self.uci:delete("passwall-ssh-slowdns", "SlowDNS", "SSH_HOST")
+        self.uci:delete("passwall-ssh-slowdns", "SlowDNS", "SSH_PORT")
+
+        for option, value in pairs(slowdns_values) do
+            local current = self.uci:get("passwall-ssh-slowdns", "SlowDNS", option)
+            if current == nil or tostring(current) ~= tostring(value) then
+                self.uci:set("passwall-ssh-slowdns", "SlowDNS", option, value)
+            end
+        end
+    end
+end
+
+-- Custom Save & Apply: commit only the two Passwall-SSH UCI packages directly,
+-- then restart the selected backend.
+m.on_after_save = function(self)
+    if luci.http.formvalue("custom_save_apply") ~= "1" then
+        return
+    end
+
+    local slowdns_ok = self.uci:commit("passwall-ssh-slowdns")
+    if slowdns_ok == false then
+        sys.call("logger -t passwall-ssh 'Failed to commit passwall-ssh-slowdns'")
+        sys.call("echo '[Passwall-SSH] Failed to save /etc/config/passwall-ssh-slowdns; service was not restarted.' >> /tmp/etc/passwall-ssh.log")
+        return
+    end
+
+    local main_ok = self.uci:commit("passwall-ssh")
+    if main_ok == false then
+        sys.call("logger -t passwall-ssh 'Failed to commit passwall-ssh'")
+        sys.call("echo '[Passwall-SSH] Failed to save /etc/config/passwall-ssh; service was not restarted.' >> /tmp/etc/passwall-ssh.log")
+        return
+    end
+
+    sys.call("mkdir -p /tmp/etc")
+    sys.call("echo STARTING > /tmp/etc/passwall-ssh.state")
+    sys.call("/etc/init.d/passwall-ssh enable >/dev/null 2>&1")
     sys.call("/etc/init.d/passwall-ssh restart >/dev/null 2>&1 &")
-    luci.http.redirect(luci.dispatcher.build_url("admin", "services", "passwall-ssh"))
+    local selected_mode = self.uci:get("passwall-ssh", "main", "transport_mode") or "ssh"
+    local active_tab = luci.http.formvalue("active_tab_selection") or ""
+    local allowed_tabs = selected_mode == "slowdns"
+        and { slowdns = true, update = true, log = true }
+        or { main = true, dns = true, config = true, update = true, log = true }
+
+    if not allowed_tabs[active_tab] then
+        active_tab = selected_mode == "slowdns" and "slowdns" or "main"
+    end
+
+    local page_url = luci.dispatcher.build_url("admin", "services", "passwall-ssh")
+    luci.http.redirect(page_url .. "#tab=" .. active_tab)
 end
 
 local active_profile_id = m.uci:get("passwall-ssh", "main", "selected_profile")
-local active_profile = "No Profile"
+local ssh_profile_name = "No Profile"
 
 if active_profile_id and active_profile_id ~= "" then
-    active_profile = m.uci:get("passwall-ssh", active_profile_id, "alias") or active_profile_id
+    ssh_profile_name = m.uci:get("passwall-ssh", active_profile_id, "alias") or active_profile_id
 end
 
+local active_transport_mode = m.uci:get("passwall-ssh", "main", "transport_mode") or "ssh"
+local active_profile = active_transport_mode == "slowdns" and "SlowDNS" or ssh_profile_name
+
+local initial_service_state = fs.readfile("/tmp/etc/passwall-ssh.state") or ""
+initial_service_state = initial_service_state:gsub("%s+", "")
+if initial_service_state == "" then initial_service_state = "STOPPED" end
+local initial_service_locked = initial_service_state ~= "STOPPED"
+
+local function slowdns_html_escape(value)
+    value = tostring(value or "")
+    value = value:gsub("&", "&amp;")
+    value = value:gsub("<", "&lt;")
+    value = value:gsub(">", "&gt;")
+    value = value:gsub('"', "&quot;")
+    value = value:gsub("'", "&#39;")
+    return value
+end
+
+local function get_initial_local_ip()
+    local route_out = sys.exec([[ip route 2>/dev/null | awk '/^default/ {
+        src=""; dev="";
+        for(i=1;i<=NF;i++) {
+            if($i=="src") src=$(i+1);
+            if($i=="dev") dev=$(i+1);
+        }
+        if(dev!="tun0" && (src!="" || dev!="")) { print src "|" dev; found=1; exit }
+        if(!fallback && (src!="" || dev!="")) fallback=src "|" dev;
+    }
+    END { if(!found && fallback!="") print fallback }']]) or ""
+    route_out = route_out:gsub("[\r\n]+", "")
+    local src_ip, dev = route_out:match("^([^|]*)|([^|]*)$")
+    src_ip = (src_ip or ""):gsub("%s+", "")
+    dev = (dev or ""):gsub("%s+", "")
+
+    if src_ip == "" and dev ~= "" and dev:match("^[%w%.%-_]+$") then
+        src_ip = (sys.exec("ip -4 addr show dev '" .. dev .. "' 2>/dev/null | awk '/inet / {split($2,a,\"/\"); print a[1]; exit}'") or ""):gsub("%s+", "")
+    end
+
+    if src_ip ~= "" and dev ~= "" then
+        return src_ip .. " (" .. dev .. ")"
+    elseif src_ip ~= "" then
+        return src_ip
+    elseif dev ~= "" then
+        return dev
+    else
+        return "Offline"
+    end
+end
+
+local initial_local_ip = get_initial_local_ip()
+
 -- ==========================================
--- TOP STATUS PANEL & CUSTOM TABS 
+-- TOP STATUS PANEL & CUSTOM TABS
 -- ==========================================
 local top_sec = m:section(SimpleSection)
 local header_ui = top_sec:option(DummyValue, "_header")
 header_ui.rawhtml = true
 header_ui.cfgvalue = function()
+    local initial_mode = active_transport_mode == "slowdns" and "slowdns" or "ssh"
     return [=[
     <style>
     .cbi-section-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: transparent; border-radius: 4px; overflow: hidden; }
@@ -32,29 +218,29 @@ header_ui.cfgvalue = function()
     .cbi-section-table th { background: rgba(128, 128, 128, 0.1); color: inherit; font-size: 13px; font-weight: bold; }
     .cbi-section-table tr:hover { background: rgba(128, 128, 128, 0.05); }
 
-    .full-width-container { display: block; width: 100%; clear: both; margin-bottom: 0px; color: inherit; }
+    .full-width-container { display: block; width: 100%; max-width: 100%; box-sizing: border-box; clear: both; margin-bottom: 0px; color: inherit; }
 
     .pw-panel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 15px; background: transparent; padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); width: 100%; box-sizing: border-box; }
-    @media screen and (max-width: 768px) { .pw-panel { grid-template-columns: repeat(2, 1fr); } }
+    @media screen and (max-width: 768px) { .pw-panel { grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 10px; } }
     @media screen and (max-width: 480px) { .pw-panel { grid-template-columns: 1fr; } }
 
-    .pw-box { display: flex; align-items: center; background: rgba(128, 128, 128, 0.05); padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); transition: 0.2s; }
-    .pw-icon { width: 35px; height: 35px; margin-right: 15px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+    .pw-box { display: flex; align-items: center; background: rgba(128, 128, 128, 0.05); padding: 15px; border-radius: 4px; border: 1px solid rgba(128, 128, 128, 0.2); transition: 0.2s; min-width: 0; }
+    .pw-icon { width: 35px; height: 35px; min-width: 35px; margin-right: 15px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
     .pw-icon img { width: 100%; height: 100%; object-fit: contain; }
-    .pw-info { display: flex; flex-direction: column; }
+    .pw-info { display: flex; flex-direction: column; min-width: 0; }
     .pw-title { font-size: 12px; color: inherit; opacity: 0.7; margin-bottom: 4px; font-weight: bold; }
-    .pw-val { font-size: 14px; font-weight: bold; transition: 0.2s; }
-    
+    .pw-val { font-size: 14px; font-weight: bold; transition: 0.2s; word-break: break-word; }
+
     .pw-box.clickable { cursor: pointer; }
     .pw-box.clickable .pw-icon { opacity: 0.7; }
     .pw-box.clickable:hover .pw-icon { opacity: 1; transform: scale(1.1); }
-    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 0px; flex-wrap: wrap; padding-bottom: 0px; gap: 15px; }
-    
+    .toolbar-wrapper { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 0px; flex-wrap: wrap; padding-bottom: 0px; gap: 15px; width: 100%; box-sizing: border-box; }
+
     /* ===== TAB CONTAINER ===== */
-    .cbi-tabmenu { display: flex; color: inherit !important; gap: 3px; }
+    .cbi-tabmenu { display: flex; flex-wrap: wrap; color: inherit !important; gap: 3px; width: 100%; box-sizing: border-box; }
     .cbi-tabmenu > li { color: inherit !important; margin: 0; padding: 0; position: relative; }
     .cbi-tabmenu > li > a {
-        display: block; padding: 8px 16px; line-height: 18px; color: inherit !important; text-decoration: none;
+        display: block; padding: 8px 14px; line-height: 18px; color: inherit !important; text-decoration: none;
         background: rgba(128,128,128,.06); border: 1px solid rgba(128,128,128,.25); border-bottom-color: rgba(128,128,128,.25);
         border-radius: 4px 4px 0 0; box-shadow: inset 0 1px rgba(255,255,255,.08); transition: all .2s ease;
     }
@@ -62,7 +248,7 @@ header_ui.cfgvalue = function()
     .cbi-tabmenu > li.active > a {
         color: #00AEFF !important; background: transparent; border-color: rgba(128,128,128,.25); border-top:2px solid #00AEFF;
         padding-top:7px; margin-bottom: -1px; box-shadow: 0 -1px 3px rgba(0,0,0,.05); font-weight: 600;
-    } 
+    }
 
     /* NOTIFIKASI MERAH UPDATE */
     .tab-notif::after {
@@ -76,24 +262,36 @@ header_ui.cfgvalue = function()
         border-radius: 50%;
         box-shadow: 0 0 5px rgba(255, 76, 76, 0.8);
     }
-   
-    .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; }
+
+    .profile-text { font-size: 16px; color: inherit; opacity: 0.8; display: flex; align-items: center; margin-left: auto; flex-wrap: wrap; justify-content: center; }
     .profile-text .p-name { font-weight: bold; color: inherit; margin-right: 5px; opacity: 1; }
     .profile-text .p-status { font-weight: bold; margin-left: 3px; }
 
     #ip-widget-placeholder { display: flex; align-items: center; justify-content: center; margin-bottom: 15px; width: 100%; }
-    
-    .status-bar { 
+
+    .status-bar {
         background: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 4px;
         padding: 10px 15px; color: inherit; display: flex; justify-content: center; align-items: center;
-        white-space: nowrap; width: 100%; box-sizing: border-box;
+        flex-wrap: wrap; gap: 8px; width: 100%; box-sizing: border-box;
     }
 
-    .inner { display: flex; align-items: center; gap: 12px; }
-    .flag { height: 20px; width: 28px; display: flex; align-items: center; justify-content: center; overflow: hidden; } 
+    #stats-widget-container { justify-content: space-between !important; margin-bottom: 20px; display: flex; width: 100%; }
+    .stats-col-left { display: flex; flex-direction: column; text-align: left; gap: 3px; flex: 1; min-width: 180px; }
+    .stats-col-center { margin-left: 0; justify-content: center; flex: 1; display: flex; align-items: center; min-width: 160px; }
+    .stats-col-right { display: flex; flex-direction: column; text-align: right; gap: 3px; flex: 1; min-width: 180px; }
+    .stats-col-right-row { display: flex; justify-content: flex-end; gap: 15px; }
+
+    @media screen and (max-width: 768px) {
+        #stats-widget-container { flex-direction: column; align-items: stretch !important; text-align: center; gap: 10px; }
+        .stats-col-left, .stats-col-center, .stats-col-right { text-align: center !important; align-items: center; min-width: 0; }
+        .stats-col-right-row { justify-content: center !important; }
+    }
+
+    .inner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    .flag { height: 20px; width: 28px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .flag img { height: 100%; width: 100%; object-fit: contain; border-radius: 2px; }
 
-    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; text-shadow: none; }
+    .ip-info-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; text-shadow: none; flex-wrap: wrap; justify-content: center; }
     .separator { color: inherit; opacity: 0.5; font-weight: normal; text-shadow: none; }
 
     .text-offline { color: #ff4c4c !important; }
@@ -106,10 +304,11 @@ header_ui.cfgvalue = function()
 
     .spin-anim { animation: spin-globe 1.5s linear infinite; height: 20px !important; width: 20px !important; }
     .wave-anim { animation: wave-flag 2.5s ease-in-out infinite; transform-origin: bottom left; }
-    
+
     #log_box {
         background: transparent !important; padding: 10px; font-family: monospace; font-size: 12px;
         white-space: pre-wrap; overflow-y: auto; height: 450px; border-radius: 4px; border: 1px solid rgba(128,128,128,.4);
+        box-sizing: border-box; width: 100%;
     }
 
     /* UPDATE PANEL STYLING */
@@ -123,8 +322,9 @@ header_ui.cfgvalue = function()
         flex-direction: column;
         gap: 15px;
         max-width: 650px;
+        box-sizing: border-box;
     }
-    .update-row { display: flex; align-items: center; font-size: 14px; }
+    .update-row { display: flex; align-items: center; font-size: 14px; flex-wrap: wrap; gap: 6px; }
     .update-label { width: 180px; font-weight: bold; opacity: 0.85; }
     .update-value { font-weight: bold; }
     .btn-update {
@@ -146,6 +346,97 @@ header_ui.cfgvalue = function()
     .hide-dns-fields #cbi-passwall-ssh-main-dns_proto,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_ip,
     .hide-dns-fields #cbi-passwall-ssh-main-dns_url { display: none !important; }
+
+    /* SlowDNS custom form is shown only while its tab is selected. */
+    .hide-slowdns-fields #cbi-passwall-ssh-main-_slowdns_settings { display: none !important; }
+
+    #slowdns-settings-panel .cbi-value { display: flex; align-items: flex-start; }
+    #slowdns-settings-panel .cbi-value-title { width: 25%; min-width: 145px; }
+    #slowdns-settings-panel .cbi-value-field { flex: 1; min-width: 0; }
+    #slowdns-settings-panel input[type="text"],
+    #slowdns-settings-panel input[type="password"],
+    #slowdns-settings-panel select { width: 100%; max-width: 360px; box-sizing: border-box; }
+    .cbi-button-reset { display: none !important; }
+    .slowdns-save-apply {
+        min-width: 0; min-height: 0; padding: 6px 14px !important;
+        font-size: 13px; line-height: 1.35; font-weight: 600;
+        border-width: 1px; border-radius: 3px;
+    }
+    .save-apply-wrapper { display:flex; justify-content:flex-end; width:100%; margin:20px 0 10px 0; box-sizing: border-box; }
+    @media screen and (max-width: 600px) {
+        #slowdns-settings-panel .cbi-value { display: block; }
+        #slowdns-settings-panel .cbi-value-title { width: auto; display: block; margin-bottom: 5px; text-align: left; }
+        #cbi-passwall-ssh-main .cbi-value-title { float: none; width: auto; text-align: left; display: block; margin-bottom: 5px; }
+        #cbi-passwall-ssh-main .cbi-value-field { margin-left: 0 !important; width: 100%; }
+        #cbi-passwall-ssh-main select,
+        #cbi-passwall-ssh-main input[type="text"] { max-width: 100%; box-sizing: border-box; }
+        .save-apply-wrapper { justify-content: center; }
+    }
+
+    .slowdns-fields-view #cbi-passwall-ssh-main-enabled,
+    .slowdns-fields-view #cbi-passwall-ssh-main-selected_profile { display: none !important; }
+
+.connection-mode-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 0 0 14px 0;
+        padding: 10px 15px;
+        border: 1px solid rgba(128,128,128,.22);
+        border-radius: 5px;
+        background: rgba(128,128,128,.04);
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .local-ip-box {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 5px;
+        font-size: 13px;
+        font-weight: bold;
+        min-width: 180px;
+    }
+    .local-ip-label { color: inherit; }
+    .local-ip-val { color: #FAAF00; }
+    .connection-mode-center {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        min-width: 220px;
+    }
+    .connection-mode-spacer { flex: 1; }
+    @media screen and (max-width: 768px) {
+        .connection-mode-row { flex-direction: column; justify-content: center; text-align: center; }
+        .local-ip-box { justify-content: center; min-width: 0; }
+        .connection-mode-center { min-width: 0; }
+        .connection-mode-spacer { display: none; }
+    }
+    .connection-mode-title { font-weight: bold; font-size: 13px; }
+    .connection-mode-label { min-width: 78px; font-size: 13px; font-weight: bold; }
+    .connection-mode-toggle { position: relative; display: inline-block; width: 48px; height: 25px; }
+    .connection-mode-toggle input { opacity: 0; width: 0; height: 0; }
+    .connection-mode-slider {
+        position: absolute; inset: 0; cursor: pointer;
+        background: #777; border-radius: 20px; transition: .2s;
+    }
+    .connection-mode-slider:before {
+        position: absolute; content: ""; height: 19px; width: 19px;
+        left: 3px; top: 3px; background: #fff; border-radius: 50%;
+        transition: .2s;
+    }
+    .connection-mode-toggle input:checked + .connection-mode-slider { background: #1689d7; }
+    .connection-mode-toggle input:checked + .connection-mode-slider:before { transform: translateX(23px); }
+    .connection-mode-row.mode-locked { opacity: .62; }
+    .connection-mode-toggle input:disabled + .connection-mode-slider {
+        cursor: not-allowed;
+        opacity: .65;
+    }
 
     .cbi-map { padding-top: 0 !important; }
     .cbi-section, .cbi-map-section { margin-top: -8px !important; padding-top: 0 !important; }
@@ -200,8 +491,8 @@ header_ui.cfgvalue = function()
         </div>
 
         <!-- Widget Stats -->
-        <div id="stats-widget-container" class="status-bar" style="justify-content: space-between !important; margin-bottom: 25px; display: flex; width: 100%;">
-            <div style="display: flex; flex-direction: column; text-align: left; gap: 3px; flex: 1;">
+        <div id="stats-widget-container" class="status-bar">
+            <div class="stats-col-left">
                 <div style="font-size: 13px; font-weight: bold;">
                     <span style="opacity: 1;">Connection Time:</span>
                     <span id="conn-time-val" style="color: #4caf50;">00:00:00</span>
@@ -212,21 +503,43 @@ header_ui.cfgvalue = function()
                 </div>
             </div>
 
-            <div class="profile-text" style="margin-left: 0; justify-content: center; flex: 1; display: flex; align-items: center;">
-                <span class="p-name">]=] .. active_profile .. [=[</span> :
+            <div class="profile-text stats-col-center">
+                <span class="p-name" data-ssh-profile="]=] .. slowdns_html_escape(ssh_profile_name) .. [=[">]=] .. slowdns_html_escape(active_profile) .. [=[</span> :
                 <span class="p-status" id="profile-status" style="color:#888;">Checking...</span>
             </div>
 
-            <div style="display: flex; flex-direction: column; text-align: right; gap: 3px; flex: 1;">
-                <div style="display: flex; justify-content: flex-end; gap: 15px; font-size: 13px; font-weight: bold;">
+            <div class="stats-col-right">
+                <div class="stats-col-right-row" style="font-size: 13px; font-weight: bold;">
                     <div><span style="color: #4da6ff;">↓ RX:</span> <span id="rx-val">0 B</span></div>
                     <div><span style="color: #FAAF00;">↑ TX:</span> <span id="tx-val">0 B</span></div>
                 </div>
-                <div style="display: flex; justify-content: flex-end; gap: 15px; font-size: 12px; opacity: 0.8;">
+                <div class="stats-col-right-row" style="font-size: 12px; opacity: 0.8;">
                     <div>Last RX: <span id="last-rx-val">0 B</span></div>
                     <div>Last TX: <span id="last-tx-val">0 B</span></div>
                 </div>
             </div>
+        </div>
+
+        <!-- Connection Mode: independent of CBI change tracking -->
+        <div class="connection-mode-row">
+            <div class="local-ip-box">
+                <span class="local-ip-label">Local IP :</span>
+                <span class="local-ip-val" id="local-ip-val">]=] .. slowdns_html_escape(initial_local_ip) .. [=[</span>
+            </div>
+            <div class="connection-mode-center">
+                <span class="connection-mode-title">Connection Mode</span>
+                <label class="connection-mode-toggle" title="SSH HTTP / SlowDNS">
+                    <input type="checkbox" id="connection-mode-switch" ]=] ..
+                        (initial_service_locked and 'disabled="disabled"' or '') .. [=[ />
+                    <span class="connection-mode-slider"></span>
+                </label>
+                <span class="connection-mode-label" id="connection-mode-label">SSH HTTP</span>
+            </div>
+            <div class="connection-mode-spacer"></div>
+            <input type="hidden" id="transport-mode-selection"
+                name="transport_mode_selection" value="]=] .. initial_mode .. [=[" />
+            <input type="hidden" id="active-tab-selection"
+                name="active_tab_selection" value="]=] .. (initial_mode == "slowdns" and "slowdns" or "main") .. [=[" />
         </div>
 
         <!-- TOOLBAR TABS -->
@@ -235,6 +548,7 @@ header_ui.cfgvalue = function()
                 <li id="tab_main" class="active"><a href="javascript:void(0)" onclick="switchTab('main')">Main</a></li>
                 <li id="tab_dns"><a href="javascript:void(0)" onclick="switchTab('dns')">DNS</a></li>
                 <li id="tab_config"><a href="javascript:void(0)" onclick="switchTab('config')">Profile</a></li>
+                <li id="tab_slowdns"><a href="javascript:void(0)" onclick="switchTab('slowdns')">SlowDNS</a></li>
                 <li id="tab_update"><a href="javascript:void(0)" onclick="switchTab('update')">App Update</a></li>
                 <li id="tab_log"><a href="javascript:void(0)" onclick="switchTab('log')">Log</a></li>
             </ul>
@@ -251,9 +565,9 @@ header_ui.cfgvalue = function()
                     <div class="update-label">Passwall-SSH Version :</div>
                     <div class="update-value" id="upd-cur-ver">Detecting...</div>
                 </div>
-                
+
                 <div id="update-check-result" style="display: none; font-size: 14px; font-weight: bold; margin-top: 5px;"></div>
-                
+
                 <div style="margin-top: 5px;">
                     <button type="button" id="btn-app-update" class="btn-update btn-apply" style="display: none;" onclick="handleAppUpdate()">Click to update</button>
                 </div>
@@ -262,9 +576,8 @@ header_ui.cfgvalue = function()
 
         <!-- Log Container -->
         <div id="log-container" style="display: none;">
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 13px;">
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 13px; margin-top: 10px;">
                 <button type="button" class="cbi-button cbi-button-remove" onclick="clearLog()" style="padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;">Clear Logs</button>
-                <!-- Tambahan Tombol Copy -->
                 <button type="button" id="btn-copy-log" class="cbi-button cbi-button-apply" onclick="copyLog()" style="padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;">Copy Logs</button>
             </div>
             <div id="log_box"></div>
@@ -277,12 +590,13 @@ header_ui.cfgvalue = function()
         const GET_APP_INFO_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "get_app_info") .. [=[';
         const GET_UPDATE_STATUS_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "get_update_status") .. [=[';
         const DO_APP_UPDATE_URL = ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "do_app_update") .. [=[';
-        
+
         window.isFetchingIP = false;
         var startTimeEpoch = 0;
         var timerInterval = null;
         var latestDownloadUrl = "";
         var updateReady = false;
+        var serviceLocked = ]=] .. (initial_service_locked and "true" or "false") .. [=[;
 
         function formatBytes(bytes) {
             bytes = parseInt(bytes);
@@ -327,7 +641,7 @@ header_ui.cfgvalue = function()
             const infoText = document.getElementById("widget-info-text");
             const sepText = document.getElementById("widget-separator");
             const pStatus = document.getElementById("profile-status");
-            
+
             if (!flagImg || !ipText || !infoText) return;
 
             if (data.ip === "Offline" || data.ip === "Loading..." || !data.ip) {
@@ -337,12 +651,12 @@ header_ui.cfgvalue = function()
                 ipText.className = "text-offline";
                 if (sepText) sepText.style.display = "none";
                 infoText.style.display = "none";
-                if(pStatus) {
+                if (pStatus) {
                     pStatus.innerHTML = (data.ip === "Loading...") ? "Checking..." : "Disconnected";
                     pStatus.style.color = (data.ip === "Loading...") ? "#888" : "#ff4c4c";
                 }
             } else {
-                let countryCode = data.flag ? data.flag.toLowerCase() : "un"; 
+                let countryCode = data.flag ? data.flag.toLowerCase() : "un";
                 flagImg.src = 'https://flagcdn.com/w40/' + countryCode + '.png';
                 setTimeout(function() { flagImg.className = "wave-anim"; }, 50);
 
@@ -351,8 +665,8 @@ header_ui.cfgvalue = function()
                 if (sepText) sepText.style.display = "block";
                 infoText.style.display = "block";
                 infoText.innerHTML = '<span class="text-country">' + (data.country || "Unknown") + '</span> <span class="separator">|</span> <span class="text-isp-name">' + (data.isp || "Unknown") + '</span>';
-                infoText.className = ""; 
-                if(pStatus) {
+                infoText.className = "";
+                if (pStatus) {
                     pStatus.innerHTML = "Connected";
                     pStatus.style.color = "#06BA06";
                 }
@@ -360,9 +674,9 @@ header_ui.cfgvalue = function()
         }
 
         window.forceCheckIP = function() {
-            if (window.isFetchingIP) return; 
+            if (window.isFetchingIP) return;
             window.isFetchingIP = true;
-            write_status({ ip: "Loading..." }); 
+            write_status({ ip: "Loading..." });
             fetch(CHECK_IP_URL)
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
@@ -371,7 +685,7 @@ header_ui.cfgvalue = function()
                 })
                 .catch(function(e) {
                     write_status({ ip: "Offline" });
-                    window.isFetchingIP = false; 
+                    window.isFetchingIP = false;
                 });
         };
 
@@ -379,8 +693,12 @@ header_ui.cfgvalue = function()
 
         function findSection(markerId) {
             var el = document.getElementById(markerId);
-            while (el && !el.classList.contains('cbi-section') && !el.classList.contains('cbi-map-section') && el.tagName.toLowerCase() !== 'fieldset') {
+            while (el && !el.classList.contains('cbi-section') && el.tagName.toLowerCase() !== 'fieldset') {
                 el = el.parentElement;
+            }
+            if (!el) {
+                if (markerId === 'marker-main') el = document.getElementById('cbi-passwall-ssh-main');
+                if (markerId === 'marker-config') el = document.getElementById('cbi-passwall-ssh-profile');
             }
             return el;
         }
@@ -391,17 +709,16 @@ header_ui.cfgvalue = function()
                 .then(function(data) {
                     var fwVerEl = document.getElementById('upd-fw-ver');
                     var verEl = document.getElementById('upd-cur-ver');
-                    
+
                     if (fwVerEl) fwVerEl.innerText = (data.fw_ver || "Unknown") + " - " + (data.arch || "Unknown");
                     if (verEl) verEl.innerText = data.version || "Unknown";
                 });
         }
 
         function checkUpdateStatus() {
-            // Tambahkan anti-cache (URL timestamp & fetch parameter)
             var url = GET_UPDATE_STATUS_URL;
             url += (url.indexOf('?') === -1 ? '?' : '&') + 't=' + new Date().getTime();
-            
+
             fetch(url, { cache: 'no-store' })
                 .then(function(r) { return r.json(); })
                 .then(function(res) {
@@ -409,13 +726,13 @@ header_ui.cfgvalue = function()
                         document.getElementById('tab_update').classList.add('tab-notif');
                         var btn = document.getElementById('btn-app-update');
                         var resBox = document.getElementById('update-check-result');
-                        
-                        if(btn) btn.style.display = "inline-block";
-                        if(resBox) {
+
+                        if (btn) btn.style.display = "inline-block";
+                        if (resBox) {
                             resBox.style.display = "block";
                             resBox.innerHTML = '<span style="color:#ff4c4c;">Latest Version ' + res.latest_version + ' is available!</span>';
                         }
-                        
+
                         latestDownloadUrl = res.download_url;
                         updateReady = true;
                     }
@@ -423,46 +740,150 @@ header_ui.cfgvalue = function()
                 .catch(function(e) { console.log("Failed to load update status"); });
         }
 
+        function selectedTransportMode() {
+            var modeInput = document.getElementById('transport-mode-selection');
+            return modeInput && modeInput.value === 'slowdns' ? 'slowdns' : 'ssh';
+        }
+
+        function updateModeLock(state, core) {
+            var normalized = String(state || '').toUpperCase();
+            var locked = normalized !== ''
+                ? normalized !== 'STOPPED'
+                : core === '1';
+            serviceLocked = !!locked;
+
+            var modeSwitch = document.getElementById('connection-mode-switch');
+            var modeRow = document.querySelector('.connection-mode-row');
+            if (modeSwitch) {
+                modeSwitch.disabled = serviceLocked;
+                modeSwitch.title = serviceLocked
+                    ? 'Stop Passwall-SSH and wait until STOPPED before changing mode.'
+                    : 'Select SSH HTTP or SlowDNS mode.';
+                modeSwitch.setAttribute('aria-disabled', serviceLocked ? 'true' : 'false');
+            }
+            if (modeRow) {
+                modeRow.classList.toggle('mode-locked', serviceLocked);
+            }
+        }
+
         function switchTab(tabName) {
-            sessionStorage.setItem('passwall_active_tab', tabName);
-            ['main', 'dns', 'config', 'update', 'log'].forEach(function(t) {
+            var slowDnsMode = selectedTransportMode() === 'slowdns';
+            var visibleTabs = slowDnsMode
+                ? ['slowdns', 'update', 'log']
+                : ['main', 'dns', 'config', 'update', 'log'];
+
+            if (visibleTabs.indexOf(tabName) === -1)
+                tabName = slowDnsMode ? 'slowdns' : 'main';
+
+            try { sessionStorage.setItem('passwall_active_tab', tabName); } catch (e) {}
+
+            var activeTabInput = document.getElementById('active-tab-selection');
+            if (activeTabInput) activeTabInput.value = tabName;
+
+            var tabHash = '#tab=' + encodeURIComponent(tabName);
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, document.title,
+                    window.location.pathname + window.location.search + tabHash);
+            } else {
+                window.location.hash = tabHash;
+            }
+
+            var slowDnsPanel = document.getElementById('slowdns-settings-panel');
+            if (slowDnsPanel) {
+                var slowDnsInputs = slowDnsPanel.querySelectorAll('input, select');
+                Array.prototype.forEach.call(slowDnsInputs, function(input) {
+                    input.disabled = !slowDnsMode;
+                });
+            }
+
+            var secMain = findSection('marker-main');
+            if (secMain) {
+                var mainInputs = secMain.querySelectorAll('input, select');
+                Array.prototype.forEach.call(mainInputs, function(input) {
+                    if (slowDnsPanel && slowDnsPanel.contains(input)) return;
+                    if (input.id === 'connection-mode-switch') return;
+                    if (input.id === 'transport-mode-selection') return;
+                    if (input.name === 'transport_mode_selection') return;
+
+                    input.disabled = slowDnsMode;
+                });
+            }
+
+            var profileName = document.querySelector('.p-name');
+            if (profileName) {
+                profileName.textContent = slowDnsMode
+                    ? 'SlowDNS'
+                    : (profileName.getAttribute('data-ssh-profile') || 'No Profile');
+            }
+
+            ['main', 'dns', 'config', 'slowdns', 'update', 'log'].forEach(function(t) {
                 var tab = document.getElementById('tab_' + t);
-                if (tab) tab.classList.remove('active');
+                if (!tab) return;
+                tab.classList.remove('active');
+                tab.style.display = visibleTabs.indexOf(t) !== -1 ? '' : 'none';
             });
+
             var activeTab = document.getElementById('tab_' + tabName);
             if (activeTab) activeTab.classList.add('active');
 
-            var secMain = findSection('marker-main');
             var secConfig = findSection('marker-config');
             var secLog = document.getElementById('log-container');
             var secUpdate = document.getElementById('update-container');
 
             if (secMain) {
-                secMain.style.display = (tabName === 'main' || tabName === 'dns') ? 'block' : 'none';
+                var showMainSection = (tabName === 'main' || tabName === 'dns' || tabName === 'slowdns');
+                secMain.style.display = showMainSection ? 'block' : 'none';
+                secMain.classList.remove('hide-main-fields', 'hide-dns-fields',
+                                         'hide-slowdns-fields', 'slowdns-fields-view');
+
                 if (tabName === 'main') {
-                    secMain.classList.remove('hide-main-fields');
-                    secMain.classList.add('hide-dns-fields');
+                    secMain.classList.add('hide-dns-fields', 'hide-slowdns-fields');
                 } else if (tabName === 'dns') {
-                    secMain.classList.remove('hide-dns-fields');
-                    secMain.classList.add('hide-main-fields');
+                    secMain.classList.add('hide-main-fields', 'hide-slowdns-fields');
+                } else if (tabName === 'slowdns') {
+                    secMain.classList.add('hide-main-fields', 'hide-dns-fields');
                 }
             }
 
-            if (secConfig) secConfig.style.display = (tabName === 'config') ? 'block' : 'none';
+            if (secConfig) secConfig.style.display = (tabName === 'config' && !slowDnsMode) ? 'block' : 'none';
+
             if (secLog) {
                 secLog.style.display = (tabName === 'log') ? 'block' : 'none';
-                if (tabName === 'log') updateLog(); 
+                if (tabName === 'log') updateLog();
             }
+
             if (secUpdate) {
                 secUpdate.style.display = (tabName === 'update') ? 'block' : 'none';
                 if (tabName === 'update') loadAppInfo();
             }
+
+            var modeLabel = document.getElementById('connection-mode-label');
+            if (modeLabel) modeLabel.textContent = slowDnsMode ? 'SlowDNS' : 'SSH HTTP';
         }
+
+        window.switchMode = function(mode) {
+            if (mode !== 'ssh' && mode !== 'slowdns') return;
+
+            var modeInput = document.getElementById('transport-mode-selection');
+            var modeSwitch = document.getElementById('connection-mode-switch');
+
+            if (serviceLocked) {
+                var savedMode = modeInput && modeInput.value === 'slowdns' ? 'slowdns' : 'ssh';
+                if (modeSwitch) modeSwitch.checked = (savedMode === 'slowdns');
+                switchTab(savedMode === 'slowdns' ? 'slowdns' : 'main');
+                return;
+            }
+
+            if (modeInput) modeInput.value = mode;
+            if (modeSwitch) modeSwitch.checked = (mode === 'slowdns');
+
+            switchTab(mode === 'slowdns' ? 'slowdns' : 'main');
+        };
 
         window.handleAppUpdate = function() {
             if (!updateReady) return;
             var btn = document.getElementById('btn-app-update');
-            
+
             btn.classList.add('btn-disabled');
             btn.disabled = true;
 
@@ -514,15 +935,15 @@ header_ui.cfgvalue = function()
 
         function touchCheck(host, elId) {
             var el = document.getElementById(elId);
-            if(!el) return;
+            if (!el) return;
             el.innerHTML = "Checking...";
-            el.style.color = "#5bc0de"; 
+            el.style.color = "#5bc0de";
             var xhr = new XMLHttpRequest();
             xhr.open('GET', ']=] .. luci.dispatcher.build_url("admin", "services", "passwall-ssh", "check_conn") .. [=[?host=' + host, true);
             xhr.onreadystatechange = function() {
                 if (xhr.readyState === 4 && xhr.status === 200) {
                     var ms = parseInt(xhr.responseText);
-                    if (isNaN(ms)) { el.innerHTML = "FAILED"; el.style.color = "#ff4c4c"; } 
+                    if (isNaN(ms)) { el.innerHTML = "FAILED"; el.style.color = "#ff4c4c"; }
                     else { el.innerHTML = ms + " ms"; el.style.color = (ms < 500) ? "#4caf50" : "#ff9800"; }
                 }
             };
@@ -531,8 +952,8 @@ header_ui.cfgvalue = function()
 
         function updateServiceBadge(id, state) {
             var el = document.getElementById(id);
-            if(!el) return;
-            if(state === "1") { el.innerHTML = "RUNNING"; el.style.color = "#4caf50"; } 
+            if (!el) return;
+            if (state === "1") { el.innerHTML = "RUNNING"; el.style.color = "#4caf50"; }
             else { el.innerHTML = "NOT RUNNING"; el.style.color = "#ff4c4c"; }
         }
 
@@ -544,12 +965,23 @@ header_ui.cfgvalue = function()
                     var raw = xhr.responseText.trim();
                     var parts = raw.split(',');
 
-                    if(parts.length >= 1) {
+                    if (parts.length >= 1) {
                         updateServiceBadge('status-core', parts[0]);
+                        updateModeLock(parts[10] || '', parts[0]);
+
+                if (parts.length > 11 && parts[11] !== undefined) {
+                            var localIpEl = document.getElementById("local-ip-val");
+                            if (localIpEl) localIpEl.textContent = parts[11] || "Offline";
+                        }
 
                         if (parts[3]) {
                             var pName = document.querySelector('.p-name');
-                            if (pName) pName.innerHTML = parts[3];
+                            var modeInput = document.getElementById('transport-mode-selection');
+                            if (pName) {
+                                pName.setAttribute('data-ssh-profile', parts[3]);
+                                pName.textContent = (modeInput && modeInput.value === 'slowdns')
+                                    ? 'SlowDNS' : parts[3];
+                            }
                         }
 
                         var rxVal = (parts.length > 4) ? parseInt(parts[4]) : 0;
@@ -581,7 +1013,7 @@ header_ui.cfgvalue = function()
                         if (lastRxEl) lastRxEl.innerText = formatBytes(lastRxVal);
                         if (lastTxEl) lastTxEl.innerText = formatBytes(lastTxVal);
 
-                        var isRunning = (parts[0] === "1"); 
+                        var isRunning = (parts[0] === "1");
                         if (isRunning) {
                             var ipText = document.getElementById("widget-ip-text");
                             if (ipText && (ipText.innerText === "Offline" || ipText.innerText === "Loading...")) {
@@ -605,7 +1037,7 @@ header_ui.cfgvalue = function()
                     var box = document.getElementById('log_box');
                     if (!box) return;
                     var isScrolledToBottom = (box.scrollHeight - box.clientHeight <= box.scrollTop + 5);
-                    
+
                     var lines = xhr.responseText.split('\n');
                     var formattedLines = [];
                     for (var i = 0; i < lines.length; i++) {
@@ -622,7 +1054,7 @@ header_ui.cfgvalue = function()
             };
             xhr.send();
         }
-        
+
         window.clearLog = function() {
             var box = document.getElementById('log_box');
             if (box) box.innerHTML = "";
@@ -640,13 +1072,13 @@ header_ui.cfgvalue = function()
             var box = document.getElementById('log_box');
             var btn = document.getElementById('btn-copy-log');
             if (!box || !btn) return;
-            
-            var textToCopy = box.innerText; 
-            
+
+            var textToCopy = box.innerText;
+
             var showSuccess = function() {
                 var originalText = btn.innerText;
                 btn.innerText = "Copied!";
-                btn.style.backgroundColor = "#28a745"; // Warna hijau
+                btn.style.backgroundColor = "#28a745";
                 btn.style.color = "#fff";
                 setTimeout(function() {
                     btn.innerText = originalText;
@@ -655,24 +1087,21 @@ header_ui.cfgvalue = function()
                 }, 2000);
             };
 
-            // Modern Clipboard API (Jika HTTPS)
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(textToCopy).then(showSuccess).catch(function(err) {
                     console.error("Gagal menyalin: ", err);
                 });
             } else {
-                // Fallback (Untuk HTTP LuCI)
                 var textArea = document.createElement("textarea");
                 textArea.value = textToCopy;
-                // Sembunyikan textarea 
                 textArea.style.position = "fixed";
                 textArea.style.top = "-9999px";
                 textArea.style.left = "-9999px";
                 document.body.appendChild(textArea);
-                
+
                 textArea.focus();
                 textArea.select();
-                
+
                 try {
                     var successful = document.execCommand('copy');
                     if (successful) showSuccess();
@@ -680,20 +1109,72 @@ header_ui.cfgvalue = function()
                     console.error('Browser tidak mendukung copy otomatis', err);
                     alert("Gagal menyalin log.");
                 }
-                
+
                 document.body.removeChild(textArea);
             }
         };
-    
+
+        function updateSlowDnsDnsFields() {
+            var transportInput = document.getElementById('slowdns_DNS_TRANSPORT');
+            var resolverInput = document.getElementById('slowdns_DNS_RESOLVER');
+            var resolverHelp = document.getElementById('slowdns-dns-help');
+            var qtypeRow = document.getElementById('slowdns-qtype-row');
+            var transport = transportInput ? transportInput.value : 'UDP';
+
+            if (qtypeRow) qtypeRow.style.display = (transport === 'UDP') ? '' : 'none';
+
+            if (resolverInput) {
+                if (transport === 'DoH') {
+                    resolverInput.placeholder = 'https://cloudflare-dns.com/dns-query';
+                    if (resolverHelp) resolverHelp.textContent = 'Masukkan URL DoH lengkap (HTTPS), misalnya https://cloudflare-dns.com/dns-query.';
+                } else if (transport === 'DoT') {
+                    resolverInput.placeholder = '1.1.1.1:853 atau one.one.one.one:853';
+                    if (resolverHelp) resolverHelp.textContent = 'Masukkan alamat DoT host:port. Port default jika tidak diisi adalah 853.';
+                } else {
+                    resolverInput.placeholder = '1.1.1.1';
+                    if (resolverHelp) resolverHelp.textContent = 'Masukkan alamat IPv4 resolver UDP.';
+                }
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
-            switchTab(sessionStorage.getItem('passwall_active_tab') || 'main');
+            var modeInput = document.getElementById('transport-mode-selection');
+            var modeSwitch = document.getElementById('connection-mode-switch');
+            var initialMode = modeInput && modeInput.value === 'slowdns' ? 'slowdns' : 'ssh';
+            var requestedTab = '';
+            var tabHashMatch = (window.location.hash || '').match(/^#tab=(main|dns|config|slowdns|update|log)$/);
+            if (tabHashMatch) {
+                requestedTab = tabHashMatch[1];
+            } else {
+                try { requestedTab = sessionStorage.getItem('passwall_active_tab') || ''; } catch (e) {}
+            }
+
+            if (modeSwitch) {
+                modeSwitch.checked = (initialMode === 'slowdns');
+                modeSwitch.addEventListener('change', function() {
+                    if (serviceLocked) {
+                        window.switchMode(selectedTransportMode());
+                        return;
+                    }
+                    window.switchMode(this.checked ? 'slowdns' : 'ssh');
+                });
+            }
+
+            window.switchMode(initialMode);
+            if (requestedTab) switchTab(requestedTab);
+            updateSlowDnsDnsFields();
+            var dnsTransportInput = document.getElementById('slowdns_DNS_TRANSPORT');
+            if (dnsTransportInput) {
+                dnsTransportInput.addEventListener('change', updateSlowDnsDnsFields);
+            }
+            checkServicesLoop();
             window.forceCheckIP();
             startConnTimer();
-            checkUpdateStatus(); // Mengecek secara diam-diam saat load
+            checkUpdateStatus();
         });
 
         setInterval(checkServicesLoop, 3000);
-        setInterval(updateLog, 2000); 
+        setInterval(updateLog, 2000);
     </script>
     ]=]
 end
@@ -713,9 +1194,9 @@ sel = s:option(ListValue, "selected_profile", translate("Profile"))
 sel.default = ""
 sel:value("", "-- Pilih Profile --")
 m.uci:foreach("passwall-ssh", "profile", function(p)
-    if p['.name'] then 
+    if p['.name'] then
         local display_name = p.alias or p['.name']
-        sel:value(p['.name'], display_name) 
+        sel:value(p['.name'], display_name)
     end
 end)
 
@@ -747,22 +1228,197 @@ dns_url:value("dns.google/dns-query", "Google")
 dns_url:value("dns.quad9.net/dns-query", "Quad")
 dns_url.default = "cloudflare-dns.com/dns-query"
 
+local function write_ssh_option_only(option)
+    local original_write = option.write
+    local original_remove = option.remove
+
+    option.write = function(self, section, value)
+        local submitted_mode = luci.http.formvalue("transport_mode_selection")
+        if submitted_mode == "slowdns" then
+            return
+        end
+
+        local current_value = m.uci:get("passwall-ssh", section, self.option)
+        if current_value ~= nil and tostring(current_value) == tostring(value) then
+            return
+        end
+
+        if original_write then
+            return original_write(self, section, value)
+        end
+    end
+
+    option.remove = function(self, section)
+        local submitted_mode = luci.http.formvalue("transport_mode_selection")
+        if submitted_mode == "slowdns" then
+            return
+        end
+        if original_remove then
+            return original_remove(self, section)
+        end
+    end
+end
+
+write_ssh_option_only(enabled)
+write_ssh_option_only(sel)
+write_ssh_option_only(dns_proto)
+write_ssh_option_only(dns_ip)
+write_ssh_option_only(dns_url)
+
+-- ==========================================
+-- SLOWDNS SETTINGS (separate /etc/config/passwall-ssh-slowdns)
+-- ==========================================
+slowdns_settings = s:option(DummyValue, "_slowdns_settings")
+slowdns_settings.rawhtml = true
+slowdns_settings.cfgvalue = function()
+    local function sd(option, default)
+        local value = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", option)
+        if value == nil then value = default or "" end
+        return slowdns_html_escape(value)
+    end
+
+    local enabled_value = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "enabled") or "0"
+    local enabled_checked = enabled_value == "1" and ' checked="checked"' or ""
+    local selected_qtype = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "Type_DNS") or "AUTO"
+    local selected_dns_transport = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "DNS_TRANSPORT") or "UDP"
+    local selected_dns_transport_upper = string.upper(selected_dns_transport)
+    if selected_dns_transport_upper == "DOH" then
+        selected_dns_transport = "DoH"
+    elseif selected_dns_transport_upper == "DOT" then
+        selected_dns_transport = "DoT"
+    else
+        selected_dns_transport = "UDP"
+    end
+    local selected_dns_resolver = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "DNS_RESOLVER")
+    if not selected_dns_resolver or selected_dns_resolver == "" then
+        selected_dns_resolver = slowdns_uci:get("passwall-ssh-slowdns", "SlowDNS", "DNS_UDP_IP") or "1.1.1.1"
+    end
+
+    local function dns_transport_option(value, label)
+        local selected = selected_dns_transport == value and ' selected="selected"' or ""
+        return '<option value="' .. value .. '"' .. selected .. '>' .. label .. '</option>'
+    end
+
+    local function qtype_option(value, label)
+        local selected = selected_qtype == value and ' selected="selected"' or ""
+        return '<option value="' .. value .. '"' .. selected .. '>' .. label .. '</option>'
+    end
+
+    return [=[
+        <div id="slowdns-settings-panel">
+            <input type="hidden" name="slowdns_form_submit" value="1" />
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_enabled">Main Switch</label>
+                <div class="cbi-value-field">
+                    <input type="checkbox" class="cbi-input-checkbox"
+                        id="slowdns_enabled" name="slowdns_enabled" value="1"]=] ..
+                        enabled_checked .. [=[ />
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_DNS_TRANSPORT">DNS Transport :</label>
+                <div class="cbi-value-field">
+                    <select class="cbi-input-select" id="slowdns_DNS_TRANSPORT" name="slowdns_DNS_TRANSPORT">
+                        ]=] ..
+                        dns_transport_option("UDP", "UDP") ..
+                        dns_transport_option("DoH", "DoH (HTTPS)") ..
+                        dns_transport_option("DoT", "DoT (TLS)") ..
+                        [=[
+                    </select>
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_DNS_RESOLVER">DNS Resolver :</label>
+                <div class="cbi-value-field">
+                    <input type="text" class="cbi-input-text"
+                        id="slowdns_DNS_RESOLVER" name="slowdns_DNS_RESOLVER"
+                        value="]=] .. slowdns_html_escape(selected_dns_resolver) .. [=["
+                        placeholder="1.1.1.1" />
+                    <div class="cbi-value-description" id="slowdns-dns-help">Masukkan alamat IPv4 resolver UDP. DNSTT UDP menggunakan port 53.</div>
+                </div>
+            </div>
+
+            <div class="cbi-value" id="slowdns-qtype-row">
+                <label class="cbi-value-title" for="slowdns_Type_DNS">QTYPE :</label>
+                <div class="cbi-value-field">
+                    <select class="cbi-input-select" id="slowdns_Type_DNS" name="slowdns_Type_DNS">
+                        ]=] ..
+                        qtype_option("AUTO", "AUTO") ..
+                        qtype_option("NS", "NS") ..
+                        qtype_option("TXT", "TXT") ..
+                        qtype_option("MX", "MX") ..
+                        qtype_option("CNAME", "CNAME") ..
+                        qtype_option("NULL", "NULL") ..
+                        qtype_option("SRV", "SRV") ..
+                        [=[
+                    </select>
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_DNSTT_DOMAIN">Name Server :</label>
+                <div class="cbi-value-field">
+                    <input type="text" class="cbi-input-text"
+                        id="slowdns_DNSTT_DOMAIN" name="slowdns_DNSTT_DOMAIN"
+                        value="]=] .. sd("DNSTT_DOMAIN") .. [=["
+                        placeholder="ns-slowdns.example.com" />
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_DNSTT_SERVER_PUBLIC_KEY">Public Key :</label>
+                <div class="cbi-value-field">
+                    <input type="text" class="cbi-input-text"
+                        id="slowdns_DNSTT_SERVER_PUBLIC_KEY" name="slowdns_DNSTT_SERVER_PUBLIC_KEY"
+                        value="]=] .. sd("DNSTT_SERVER_PUBLIC_KEY") .. [=["
+                        placeholder="/root/server.pub atau public key hex" />
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_SSH_USERNAME">Username :</label>
+                <div class="cbi-value-field">
+                    <input type="text" class="cbi-input-text"
+                        id="slowdns_SSH_USERNAME" name="slowdns_SSH_USERNAME"
+                        value="]=] .. sd("SSH_USERNAME") .. [=["
+                        placeholder="Username SSH" />
+                </div>
+            </div>
+
+            <div class="cbi-value">
+                <label class="cbi-value-title" for="slowdns_SSH_PASSWORD">Password :</label>
+                <div class="cbi-value-field">
+                    <input type="text" class="cbi-input-text"
+                        id="slowdns_SSH_PASSWORD" name="slowdns_SSH_PASSWORD"
+                        value="]=] .. sd("SSH_PASSWORD") .. [=["
+                        placeholder="Password SSH"
+                        autocomplete="off" />
+                </div>
+            </div>
+
+        </div>
+    ]=]
+end
+
 -- ==========================================
 -- SECTION CONFIG (Profile List)
 -- ==========================================
 conf = m:section(TypedSection, "profile", "<span id='marker-config'></span>")
-conf.template = "cbi/tblsection" 
+conf.template = "cbi/tblsection"
 conf.addremove = true
 conf.anonymous = true
 
 function conf.remove(self, section)
     local active_prof = m.uci:get("passwall-ssh", "main", "selected_profile")
-    
+
     if active_prof == section then
         m.uci:set("passwall-ssh", "main", "selected_profile", "")
         m.uci:set("passwall-ssh", "main", "enabled", "0")
     end
-    
+
     TypedSection.remove(self, section)
 end
 
@@ -771,11 +1427,10 @@ conf.extedit = luci.dispatcher.build_url("admin", "services", "passwall-ssh", "e
 function conf.create(self, section)
     local uuid = sys.exec("cat /proc/sys/kernel/random/uuid 2>/dev/null") or "1a2b3c4d"
     local random_id = "p_" .. string.sub(uuid, 1, 8)
-    
+
     m.uci:section("passwall-ssh", "profile", random_id)
-    
     m.uci:set("passwall-ssh", random_id, "alias", "Nama Profil (Bebas Text)")
-    
+
     m.uci:save("passwall-ssh")
     m.uci:commit("passwall-ssh")
 
@@ -790,5 +1445,18 @@ end
 host_list = conf:option(DummyValue, "host", "Address")
 host_port_list = conf:option(DummyValue, "host_port", "Port")
 username_list = conf:option(DummyValue, "username", "Username")
+
+-- Dedicated page-level Save & Apply button.
+local action_sec = m:section(SimpleSection)
+local save_apply = action_sec:option(DummyValue, "_save_apply")
+save_apply.rawhtml = true
+save_apply.cfgvalue = function()
+    return [[
+        <div class="save-apply-wrapper">
+            <button type="button" class="cbi-button cbi-button-apply slowdns-save-apply"
+                onclick="cbi_submit(this, 'custom_save_apply')">Save &amp; Apply</button>
+        </div>
+    ]]
+end
 
 return m

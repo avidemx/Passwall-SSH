@@ -2,7 +2,7 @@ name: Build Passwall-SSH Multi-Arch
 
 on:
   workflow_dispatch:
-
+  
 permissions:
   contents: write
 
@@ -17,18 +17,13 @@ jobs:
     - name: Read version from file
       id: read_version
       run: |
-        # Cari file VERSION atau Version tanpa mempermasalahkan huruf besar/kecil
-        VER_FILE=$(ls | grep -i "^version$" | head -n 1)
-        if [ -n "$VER_FILE" ]; then
-          VERSION=$(cat "$VER_FILE" | tr -d ' \r\n')
-        else
-          VERSION="4.2.0"
-        fi
+        VER_FILE="VERSION"
+        VERSION=$(tr -d ' \r\n' < "$VER_FILE")
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Target Release Version: $VERSION"
 
   build:
-    needs: setup
+    needs: [setup, test-dnstt-client]
     name: Build OpenWrt ${{ matrix.owrt.major }} (${{ matrix.arch_item.arch }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -39,42 +34,78 @@ jobs:
       fail-fast: false
       matrix:
         owrt:
-          - version: "24.10.0"
+          - version: "24.10.8"
             major: "24"
             ext: "ipk"
-            url_prefix: "https://downloads.openwrt.org/releases/24.10.0/targets"
-          - version: "25.12.0"
+            url_prefix: "https://downloads.openwrt.org/releases/24.10.8/targets"
+          - version: "25.12.5"
             major: "25"
             ext: "apk"
-            url_prefix: "https://downloads.openwrt.org/releases/25.12.0/targets"
+            url_prefix: "https://downloads.openwrt.org/releases/25.12.5/targets"
         arch_item:
           - target: "ramips"
             subtarget: "mt7621"
             arch: "mipsel_24kc"
+            goarch: "mipsle"
+            gomips: "softfloat"
+            goarm: ""
+            go386: ""
           - target: "ath79"
             subtarget: "generic"
             arch: "mips_24kc"
+            goarch: "mips"
+            gomips: "softfloat"
+            goarm: ""
+            go386: ""
           - target: "sunxi"
             subtarget: "cortexa53"
             arch: "aarch64_cortex-a53"
+            goarch: "arm64"
+            gomips: ""
+            goarm: ""
+            go386: ""
           - target: "rockchip"
             subtarget: "armv8"
             arch: "aarch64_generic"
+            goarch: "arm64"
+            gomips: ""
+            goarm: ""
+            go386: ""
           - target: "sunxi"
             subtarget: "cortexa7"
             arch: "arm_cortex-a7"
+            goarch: "arm"
+            gomips: ""
+            goarm: "7"
+            go386: ""
           - target: "sunxi"
             subtarget: "cortexa7"
             arch: "arm_cortex-a7_neon-vfpv4"
+            goarch: "arm"
+            gomips: ""
+            goarm: "7"
+            go386: ""
           - target: "mvebu"
             subtarget: "cortexa9"
             arch: "arm_cortex-a9"
+            goarch: "arm"
+            gomips: ""
+            goarm: "7"
+            go386: ""
           - target: "x86"
             subtarget: "64"
             arch: "x86_64"
+            goarch: "amd64"
+            gomips: ""
+            goarm: ""
+            go386: ""
           - target: "x86"
             subtarget: "generic"
             arch: "i386_pentium4"
+            goarch: "386"
+            gomips: ""
+            goarm: ""
+            go386: "sse2"
 
     steps:
     - name: Checkout repository
@@ -90,9 +121,10 @@ jobs:
     - name: Sync App Version to Repository Makefile
       run: |
         echo "Building Passwall-SSH with version: $APP_VERSION"
-        if [ -f package/passwall-ssh/Makefile ]; then
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" package/passwall-ssh/Makefile
-          echo "Updated package/passwall-ssh/Makefile to $APP_VERSION"
+        MAKEFILE="package/passwall-ssh/Makefile"
+        if [ -f "$MAKEFILE" ]; then
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$APP_VERSION/" "$MAKEFILE"
+          echo "Updated $MAKEFILE to $APP_VERSION"
         fi
 
     - name: Download OpenWrt SDK
@@ -118,6 +150,13 @@ jobs:
         cp -a package/badvpn sdk/package/
         cp -a package/passwall-ssh sdk/package/
     
+    - name: Set up Go for DNSTT client
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.24.4"
+        cache: true
+        cache-dependency-path: go-dnstt/go.sum
+
     - name: Configure SDK & Set Version
       working-directory: sdk
       run: |
@@ -150,8 +189,34 @@ jobs:
         cp "$BIN_PATH" package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         chmod +x package/passwall-ssh/files/usr/bin/badvpn-tun2socks
         
-        # Tulis versi bersih ke file share router
-        echo "$APP_VERSION" > package/passwall-ssh/files/usr/share/passwall-ssh/version
+        echo "$APP_VERSION" \
+        > package/passwall-ssh/files/usr/share/passwall-ssh/version
+
+    - name: 2b. Build and inject patched DNSTT client
+      working-directory: go-dnstt
+      env:
+        GOOS: linux
+        GOARCH: ${{ matrix.arch_item.goarch }}
+        CGO_ENABLED: "0"
+        GOARM: ${{ matrix.arch_item.goarm }}
+        GOMIPS: ${{ matrix.arch_item.gomips }}
+        GO386: ${{ matrix.arch_item.go386 }}
+      run: |
+        set -euo pipefail
+        BIN="$GITHUB_WORKSPACE/sdk/package/passwall-ssh/files/usr/bin/dnstt-client"
+        mkdir -p "$(dirname "$BIN")"
+
+        echo "Building patched DNSTT client for OpenWrt ${{ matrix.arch_item.arch }}"
+        echo "Go target: GOOS=$GOOS GOARCH=$GOARCH GOARM=${GOARM:-default} GOMIPS=${GOMIPS:-default} GO386=${GO386:-default}"
+        go version
+        go build -trimpath -buildvcs=false -ldflags="-s -w" -o "$BIN" ./dnstt-client
+
+        test -s "$BIN"
+        chmod 0755 "$BIN"
+        file "$BIN"
+        readelf -h "$BIN" | grep -E 'Class:|Machine:'
+        sha256sum "$BIN"
+        ls -lh "$BIN"
 
     - name: 3. Compile Passwall-SSH
       working-directory: sdk
@@ -180,6 +245,44 @@ jobs:
         name: passwall-${{ matrix.owrt.major }}-${{ matrix.arch_item.arch }}
         path: release/*
 
+
+  test-dnstt-client:
+    name: Test patched HTTP Custom DNSTT client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.24.4"
+        cache: true
+        cache-dependency-path: go-dnstt/go.sum
+
+    - name: Test Go source and HTTP Custom implementation
+      working-directory: go-dnstt
+      run: |
+        set -euo pipefail
+        go version
+        go mod verify
+        go test ./...
+        go vet ./dns ./dnstt-client ./turbotunnel
+
+    - name: Build and smoke-test native dnstt-client
+      working-directory: go-dnstt
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -buildvcs=false -ldflags="-s -w" \
+          -o dist/dnstt-client-linux-amd64 ./dnstt-client
+        dist/dnstt-client-linux-amd64 -help > dist/dnstt-client-help.txt 2>&1 || true
+        grep -E -- '-httpcustom|-qtype|-udp|-pubkey-file' dist/dnstt-client-help.txt
+        file dist/dnstt-client-linux-amd64
+        sha256sum dist/dnstt-client-linux-amd64
+        
   release:
     needs: [setup, build]
     runs-on: ubuntu-24.04
@@ -204,8 +307,8 @@ jobs:
           * Perbaikan beberapa bug.
           ---
           ### Arsitektur & Versi yang Tersedia:
-          - **OpenWrt 24.x** (`.ipk`)
-          - **OpenWrt 25.x** (`.apk`)
+          - **OpenWrt 24.x** (\`.ipk\`)
+          - **OpenWrt 25.x** (\`.apk\`)
 
         draft: false
         prerelease: false

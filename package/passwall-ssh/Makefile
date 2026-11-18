@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=passwall-ssh
-PKG_VERSION:=4.5.0
+PKG_VERSION:=6.1.1
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=avidemx
@@ -22,6 +22,7 @@ endef
 
 define Package/passwall-ssh/conffiles
 /etc/config/passwall-ssh
+/etc/config/passwall-ssh-slowdns
 endef
 
 define Build/Compile
